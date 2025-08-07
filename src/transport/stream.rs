@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::Instant;
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use tokio_stream::StreamExt;
 use zerocopy::U16;
@@ -178,7 +179,8 @@ async fn recv_for_codec<T>(
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
-    let mut hb_interval = tokio::time::interval(heartbeat_interval);
+    let mut hb_interval =
+        tokio::time::interval_at(Instant::now() + heartbeat_interval, heartbeat_interval);
 
     loop {
         tokio::select! {
