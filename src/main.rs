@@ -1,0 +1,301 @@
+mod keyring;
+mod meshtastic;
+mod meshtastic_display;
+mod meshtastic_print;
+mod transport;
+
+use meshtastic_print::{print_from_radio_payload, print_mesh_packet, print_service_envelope};
+use serde::{Deserialize, Serialize};
+use serde_yaml_ng::from_reader;
+use transport::{
+    multicast::Multicast,
+    stream::{self, Stream, StreamAddress},
+};
+
+use chrono::Local;
+use keyring::{
+    Keyring,
+    key::{K256, Key},
+    node_id::NodeId,
+};
+use rumqttc::{AsyncClient, MqttOptions, QoS};
+use std::time::Duration;
+use std::{fs::File, io::BufReader, net::SocketAddr};
+use tokio::io::AsyncWriteExt;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+struct TCPConfig {
+    connect_to: SocketAddr,
+    heartbeat_seconds: u64,
+}
+
+#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
+struct MQTTConfig {
+    server_addr: String,
+    server_port: u16,
+    username: String,
+    password: String,
+    subscribe: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+struct MulticastConfig {
+    listen_address: SocketAddr,
+}
+
+impl Default for MulticastConfig {
+    fn default() -> Self {
+        Self {
+            listen_address: "224.0.0.69:4403".parse().unwrap(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
+enum Mode {
+    TCP(TCPConfig),
+    Multicast(MulticastConfig),
+    MQTT(MQTTConfig),
+}
+
+impl Default for Mode {
+    fn default() -> Self {
+        Mode::Multicast(Default::default())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+struct Channel {
+    name: String,
+    key: Key,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+struct Peer {
+    name: String,
+    node_id: NodeId,
+    highlight: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    public_key: Option<K256>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    private_key: Option<K256>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+struct Config {
+    mode: Mode,
+    channels: Vec<Channel>,
+    peers: Vec<Peer>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            mode: Default::default(),
+            channels: vec![
+                Channel {
+                    name: "LongFast".into(),
+                    key: "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
+                },
+                Channel {
+                    name: "ShortFast".into(),
+                    key: "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
+                },
+            ],
+            peers: vec![],
+        }
+    }
+}
+
+fn print_example_config() {
+    let config_tcp = Config {
+        mode: Mode::TCP(TCPConfig {
+            connect_to: "127.0.0.1:4403".parse().unwrap(),
+            heartbeat_seconds: 5,
+        }),
+        channels: vec![Channel {
+            name: "LongFast".into(),
+            key: "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
+        }],
+        peers: vec![
+            Peer {
+                name: "OwnedPeer".into(),
+                node_id: "!aabbccdd".try_into().unwrap(),
+                highlight: false,
+                public_key: None,
+                private_key: Some(
+                    "mKsioP5e59jZiW9yYjzAPDnfvsIk1+p+g80ke09wkls="
+                        .try_into()
+                        .unwrap(),
+                ),
+            },
+            Peer {
+                name: "RemotePeer".into(),
+                node_id: "!ddccbbaa".try_into().unwrap(),
+                highlight: true,
+                public_key: Some(
+                    "+AszX0jkaklCkfjdqrJ6N/L9PDZYvPIhDLj8iiAEjxU="
+                        .try_into()
+                        .unwrap(),
+                ),
+                private_key: None,
+            },
+        ],
+    };
+    println!("=== example tcp config ===");
+    println!("{}", serde_yaml_ng::to_string(&config_tcp).unwrap());
+    println!("=== ===");
+
+    let config_mqtt = Config {
+        mode: Mode::MQTT(MQTTConfig {
+            server_addr: "mqtt-server.com".into(),
+            server_port: 1883,
+            username: "cat".into(),
+            password: "to big cat".into(),
+            subscribe: vec!["msh/+/+".into()],
+        }),
+        channels: vec![],
+        peers: vec![],
+    };
+    println!("=== example mqtt config ===");
+    println!("{}", serde_yaml_ng::to_string(&config_mqtt).unwrap());
+    println!("=== ===");
+}
+
+fn load_config() -> Config {
+    match File::open("config.yaml") {
+        Ok(file) => {
+            let reader = BufReader::new(file);
+
+            match from_reader::<_, Config>(reader) {
+                Ok(config) => config,
+                Err(e) => {
+                    println!("Config file not loaded: {}", e);
+                    print_example_config();
+                    println!("Use default config");
+
+                    Default::default()
+                }
+            }
+        }
+        Err(e) => {
+            println!("Config file `config.yaml` is not accessible: {}", e);
+            print_example_config();
+            println!("Use default config");
+
+            Default::default()
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let config = load_config();
+
+    println!("=== loaded config ===");
+    println!("{}", serde_yaml_ng::to_string(&config).unwrap());
+    println!("=== ===");
+
+    let mut keyring = Keyring::new();
+    let mut filter_by_nodeid: Vec<NodeId> = Default::default();
+
+    for channel in config.channels {
+        keyring
+            .add_channel(channel.name.as_str(), channel.key)
+            .unwrap();
+    }
+
+    for peer in config.peers {
+        if let Some(skey) = peer.private_key {
+            keyring.add_peer(peer.node_id, skey).unwrap();
+        } else if let Some(pkey) = peer.public_key {
+            keyring.add_remote_peer(peer.node_id, pkey).unwrap();
+        }
+        if peer.highlight {
+            filter_by_nodeid.push(peer.node_id);
+        }
+    }
+
+    println!();
+    match config.mode {
+        Mode::MQTT(mqtt) => {
+            println!(
+                "Connect to MQTT {} port {}: {:?}",
+                mqtt.server_addr, mqtt.server_port, mqtt.subscribe
+            );
+
+            let mut mqttoptions =
+                MqttOptions::new("rumqtt-async", mqtt.server_addr, mqtt.server_port);
+            mqttoptions.set_keep_alive(Duration::from_secs(5));
+            mqttoptions.set_credentials(mqtt.username, mqtt.password);
+
+            let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+            for topic in mqtt.subscribe {
+                client.subscribe(topic, QoS::AtMostOnce).await.unwrap();
+            }
+
+            loop {
+                let notification = eventloop.poll().await.unwrap();
+                let system_time = Local::now().format("%H:%M:%S").to_string();
+
+                if let rumqttc::Event::Incoming(packet) = notification {
+                    match packet {
+                        rumqttc::Packet::Publish(publish) => {
+                            println!("> {} [size: {}] ", publish.topic, publish.payload.len());
+                            print_service_envelope(publish.payload, &keyring, &filter_by_nodeid)
+                                .await;
+                        }
+                        rumqttc::Packet::PingReq => {}
+                        rumqttc::Packet::PingResp => {}
+                        _ => {
+                            println!("> [{}] {:?}", system_time, packet)
+                        }
+                    }
+                }
+            }
+        }
+        Mode::TCP(tcp) => {
+            println!("Connect to TCP {}", tcp.connect_to);
+
+            let mut connection = Stream::new(
+                StreamAddress::TCPSocket(tcp.connect_to),
+                Duration::from_secs(tcp.heartbeat_seconds),
+            );
+
+            connection.connect().await.unwrap();
+            loop {
+                let stream_data = connection.recv().await.unwrap();
+
+                match stream_data {
+                    stream::StreamData::Packet(from_radio) => {
+                        if let Some(payload_variant) = from_radio.payload_variant {
+                            println!("> message id: {:x}", from_radio.id);
+                            print_from_radio_payload(payload_variant, &keyring, &filter_by_nodeid)
+                                .await;
+                        } else {
+                            println!("> message id: {:x} no payload", from_radio.id);
+                        }
+                        println!();
+                    }
+                    stream::StreamData::Unstructured(bytes) => {
+                        tokio::io::stderr().write_all(&bytes).await.unwrap();
+                        println!("\x1b[0m");
+                    }
+                }
+            }
+        }
+        Mode::Multicast(multicast) => {
+            println!("Listen multicast on {}", multicast.listen_address);
+            let mut connection = Multicast::new(multicast.listen_address);
+
+            connection.connect().await.unwrap();
+            loop {
+                let (mesh_packet, _) = connection.recv().await.unwrap();
+
+                print_mesh_packet(mesh_packet, &keyring, &filter_by_nodeid).await;
+
+                println!();
+            }
+        }
+    }
+}
