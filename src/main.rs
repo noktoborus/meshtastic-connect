@@ -51,9 +51,25 @@ impl Default for MulticastConfig {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+struct SerialConfig {
+    tty: String,
+    heartbeat_seconds: u64,
+}
+
+impl Default for SerialConfig {
+    fn default() -> Self {
+        Self {
+            tty: "/dev/ttyS0".into(),
+            heartbeat_seconds: 5,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 enum Mode {
     TCP(TCPConfig),
+    Serial(SerialConfig),
     Multicast(MulticastConfig),
     MQTT(MQTTConfig),
 }
@@ -257,32 +273,22 @@ async fn main() {
         Mode::TCP(tcp) => {
             println!("Connect to TCP {}", tcp.connect_to);
 
-            let mut connection = Stream::new(
+            let connection = Stream::new(
                 StreamAddress::TCPSocket(tcp.connect_to),
                 Duration::from_secs(tcp.heartbeat_seconds),
             );
 
-            connection.connect().await.unwrap();
-            loop {
-                let stream_data = connection.recv().await.unwrap();
+            connect_to_stream(connection, &keyring, &filter_by_nodeid).await;
+        }
+        Mode::Serial(serial) => {
+            println!("Connect to serial port {}", serial.tty);
 
-                match stream_data {
-                    stream::StreamData::Packet(from_radio) => {
-                        if let Some(payload_variant) = from_radio.payload_variant {
-                            println!("> message id: {:x}", from_radio.id);
-                            print_from_radio_payload(payload_variant, &keyring, &filter_by_nodeid)
-                                .await;
-                        } else {
-                            println!("> message id: {:x} no payload", from_radio.id);
-                        }
-                        println!();
-                    }
-                    stream::StreamData::Unstructured(bytes) => {
-                        tokio::io::stderr().write_all(&bytes).await.unwrap();
-                        println!("\x1b[0m");
-                    }
-                }
-            }
+            let connection = Stream::new(
+                StreamAddress::Serial(serial.tty),
+                Duration::from_secs(serial.heartbeat_seconds),
+            );
+
+            connect_to_stream(connection, &keyring, &filter_by_nodeid).await;
         }
         Mode::Multicast(multicast) => {
             println!("Listen multicast on {}", multicast.listen_address);
@@ -295,6 +301,33 @@ async fn main() {
                 print_mesh_packet(mesh_packet, &keyring, &filter_by_nodeid).await;
 
                 println!();
+            }
+        }
+    }
+}
+
+async fn connect_to_stream(
+    mut connection: Stream,
+    keyring: &Keyring,
+    filter_by_nodeid: &Vec<NodeId>,
+) {
+    connection.connect().await.unwrap();
+    loop {
+        let stream_data = connection.recv().await.unwrap();
+
+        match stream_data {
+            stream::StreamData::Packet(from_radio) => {
+                if let Some(payload_variant) = from_radio.payload_variant {
+                    println!("> message id: {:x}", from_radio.id);
+                    print_from_radio_payload(payload_variant, keyring, filter_by_nodeid).await;
+                } else {
+                    println!("> message id: {:x} no payload", from_radio.id);
+                }
+                println!();
+            }
+            stream::StreamData::Unstructured(bytes) => {
+                tokio::io::stderr().write_all(&bytes).await.unwrap();
+                println!("\x1b[0m");
             }
         }
     }
