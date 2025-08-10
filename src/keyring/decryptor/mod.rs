@@ -9,7 +9,11 @@ pub mod pki;
 pub mod symmetric;
 
 pub trait Decrypt {
-    async fn decrypt(&self, packet_id: u32, data: Vec<u8>) -> Result<meshtastic::Data, String>;
+    fn decrypt(
+        &self,
+        packet_id: u32,
+        data: Vec<u8>,
+    ) -> impl std::future::Future<Output = Result<meshtastic::Data, String>> + Send;
 }
 
 pub enum Decryptor {

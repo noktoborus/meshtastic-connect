@@ -1,17 +1,15 @@
-mod keyring;
-mod meshtastic;
-mod meshtastic_display;
-mod meshtastic_print;
-mod transport;
+use meshtastic_connect::keyring;
 
 use clap::Parser;
-use meshtastic_print::{print_from_radio_payload, print_mesh_packet, print_service_envelope};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_yaml_ng::from_reader;
-use transport::{
+use meshtastic_connect::meshtastic_print::{
+    print_from_radio_payload, print_mesh_packet, print_service_envelope,
+};
+use meshtastic_connect::transport::{
     multicast::Multicast,
     stream::{self, Serial, Stream, StreamAddress},
 };
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_yaml_ng::from_reader;
 
 use chrono::Local;
 use keyring::{
