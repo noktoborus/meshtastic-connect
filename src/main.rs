@@ -4,6 +4,7 @@ mod meshtastic_display;
 mod meshtastic_print;
 mod transport;
 
+use clap::Parser;
 use meshtastic_print::{print_from_radio_payload, print_mesh_packet, print_service_envelope};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::from_reader;
@@ -22,6 +23,14 @@ use rumqttc::{AsyncClient, MqttOptions, QoS};
 use std::time::Duration;
 use std::{fs::File, io::BufReader, net::SocketAddr};
 use tokio::io::AsyncWriteExt;
+
+#[derive(clap::Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    // Path to config file
+    #[arg(short, long, default_value_t = String::from("config.yaml"))]
+    config_file: String,
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 struct TCPConfig {
@@ -178,8 +187,9 @@ fn print_example_config() {
     println!("=== ===");
 }
 
-fn load_config() -> Config {
-    match File::open("config.yaml") {
+fn load_config(args: &Args) -> Config {
+    println!("Try to read {}", args.config_file);
+    match File::open(&args.config_file) {
         Ok(file) => {
             let reader = BufReader::new(file);
 
@@ -206,7 +216,8 @@ fn load_config() -> Config {
 
 #[tokio::main]
 async fn main() {
-    let config = load_config();
+    let args = Args::parse();
+    let config = load_config(&args);
 
     println!("=== loaded config ===");
     println!("{}", serde_yaml_ng::to_string(&config).unwrap());
