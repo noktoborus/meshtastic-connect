@@ -153,9 +153,15 @@ impl Encoder<meshtastic::to_radio::PayloadVariant> for RadioCodec {
 }
 
 #[derive(Clone, Debug)]
+pub struct Serial {
+    pub tty: String,
+    pub baudrate: u32,
+}
+
+#[derive(Clone, Debug)]
 pub enum StreamAddress {
     TCPSocket(SocketAddr),
-    Serial(String),
+    Serial(Serial),
 }
 
 #[derive(Debug)]
@@ -241,8 +247,8 @@ impl Stream {
                     .await?;
                 self.codec = StreamCodec::Socket(codec);
             }
-            StreamAddress::Serial(port) => {
-                let mut serial = tokio_serial::new(port.clone(), 115200)
+            StreamAddress::Serial(serial) => {
+                let mut serial = tokio_serial::new(serial.tty.clone(), serial.baudrate)
                     .data_bits(tokio_serial::DataBits::Eight)
                     .parity(tokio_serial::Parity::None)
                     .stop_bits(tokio_serial::StopBits::One)

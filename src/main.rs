@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_yaml_ng::from_reader;
 use transport::{
     multicast::Multicast,
-    stream::{self, Stream, StreamAddress},
+    stream::{self, Serial, Stream, StreamAddress},
 };
 
 use chrono::Local;
@@ -67,6 +67,7 @@ impl Default for MulticastConfig {
 struct SerialConfig {
     tty: String,
     heartbeat_seconds: u64,
+    baudrate: u32,
 }
 
 impl Default for SerialConfig {
@@ -74,6 +75,7 @@ impl Default for SerialConfig {
         Self {
             tty: "/dev/ttyS0".into(),
             heartbeat_seconds: 5,
+            baudrate: 115200,
         }
     }
 }
@@ -265,10 +267,16 @@ async fn main() {
             connect_to_stream(connection, &keyring, &filter_by_nodeid).await;
         }
         Mode::Serial(serial) => {
-            println!("Connect to serial port {}", serial.tty);
+            println!(
+                "Connect to serial port {} with baudrate {}",
+                serial.tty, serial.baudrate
+            );
 
             let connection = Stream::new(
-                StreamAddress::Serial(serial.tty),
+                StreamAddress::Serial(Serial {
+                    tty: serial.tty,
+                    baudrate: serial.baudrate,
+                }),
                 Duration::from_secs(serial.heartbeat_seconds),
             );
 

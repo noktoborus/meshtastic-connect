@@ -5,6 +5,7 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use crate::{keyring::Keyring, meshtastic};
 use bytes::Bytes;
 use parking_lot::RwLock;
+use stream::Serial;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 
@@ -56,7 +57,10 @@ impl Endpoint {
                 )))
             }
             Endpoint::Serial(endpoint) => Ok(TransportVariant::Stream(stream::Stream::new(
-                stream::StreamAddress::Serial(endpoint),
+                stream::StreamAddress::Serial(Serial {
+                    tty: endpoint,
+                    baudrate: 115200,
+                }),
                 Duration::from_secs(HEARTBEAT_SECS),
             ))),
         }
