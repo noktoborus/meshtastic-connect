@@ -1,5 +1,6 @@
 /target
-config.yaml
+/connection.yaml
+/keys.yaml
 # Added by cargo
 #
 # already existing elements were commented out

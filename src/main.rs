@@ -6,7 +6,7 @@ mod transport;
 
 use clap::Parser;
 use meshtastic_print::{print_from_radio_payload, print_mesh_packet, print_service_envelope};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_yaml_ng::from_reader;
 use transport::{
     multicast::Multicast,
@@ -28,8 +28,11 @@ use tokio::io::AsyncWriteExt;
 #[command(version, about, long_about = None)]
 struct Args {
     // Path to config file
-    #[arg(short, long, default_value_t = String::from("config.yaml"))]
-    config_file: String,
+    #[arg(short, long, default_value_t = String::from("connection.yaml"))]
+    connection_file: String,
+    // Path to file with keys to decode Peers and Channels messages
+    #[arg(short, long, default_value_t = String::from("keys.yaml"))]
+    keys_file: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -107,117 +110,87 @@ struct Peer {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-struct Config {
+struct ConnectionConfig {
     mode: Mode,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+struct KeysConfig {
     channels: Vec<Channel>,
     peers: Vec<Peer>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+struct Config {
+    connection: ConnectionConfig,
+    keys: KeysConfig,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            mode: Default::default(),
-            channels: vec![
-                Channel {
-                    name: "LongFast".into(),
-                    key: "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
-                },
-                Channel {
-                    name: "ShortFast".into(),
-                    key: "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
-                },
-            ],
-            peers: vec![],
+            connection: ConnectionConfig {
+                mode: Default::default(),
+            },
+            keys: KeysConfig {
+                channels: vec![
+                    Channel {
+                        name: "LongFast".into(),
+                        key: "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
+                    },
+                    Channel {
+                        name: "ShortFast".into(),
+                        key: "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
+                    },
+                ],
+                peers: vec![],
+            },
         }
     }
 }
 
-fn print_example_config() {
-    let config_tcp = Config {
-        mode: Mode::TCP(TCPConfig {
-            connect_to: "127.0.0.1:4403".parse().unwrap(),
-            heartbeat_seconds: 5,
-        }),
-        channels: vec![Channel {
-            name: "LongFast".into(),
-            key: "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
-        }],
-        peers: vec![
-            Peer {
-                name: "OwnedPeer".into(),
-                node_id: "!aabbccdd".try_into().unwrap(),
-                highlight: false,
-                public_key: None,
-                private_key: Some(
-                    "mKsioP5e59jZiW9yYjzAPDnfvsIk1+p+g80ke09wkls="
-                        .try_into()
-                        .unwrap(),
-                ),
-            },
-            Peer {
-                name: "RemotePeer".into(),
-                node_id: "!ddccbbaa".try_into().unwrap(),
-                highlight: true,
-                public_key: Some(
-                    "+AszX0jkaklCkfjdqrJ6N/L9PDZYvPIhDLj8iiAEjxU="
-                        .try_into()
-                        .unwrap(),
-                ),
-                private_key: None,
-            },
-        ],
-    };
-    println!("=== example tcp config ===");
-    println!("{}", serde_yaml_ng::to_string(&config_tcp).unwrap());
-    println!("=== ===");
-
-    let config_mqtt = Config {
-        mode: Mode::MQTT(MQTTConfig {
-            server_addr: "mqtt-server.com".into(),
-            server_port: 1883,
-            username: "cat".into(),
-            password: "to big cat".into(),
-            subscribe: vec!["msh/+/+".into()],
-        }),
-        channels: vec![],
-        peers: vec![],
-    };
-    println!("=== example mqtt config ===");
-    println!("{}", serde_yaml_ng::to_string(&config_mqtt).unwrap());
-    println!("=== ===");
-}
-
-fn load_config(args: &Args) -> Config {
-    println!("Try to read {}", args.config_file);
-    match File::open(&args.config_file) {
+fn config_read<T>(path: &String) -> Option<T>
+where
+    T: DeserializeOwned,
+{
+    println!("Try to read {}", path);
+    match File::open(&path) {
         Ok(file) => {
             let reader = BufReader::new(file);
 
-            match from_reader::<_, Config>(reader) {
-                Ok(config) => config,
+            match from_reader::<_, T>(reader) {
+                Ok(config) => {
+                    println!("... ok");
+                    Some(config)
+                }
                 Err(e) => {
-                    println!("Config file not loaded: {}", e);
-                    print_example_config();
-                    println!("Use default config");
-
-                    Default::default()
+                    println!("Config file `{}` not loaded: {}", path, e);
+                    None
                 }
             }
         }
         Err(e) => {
-            println!("Config file `config.yaml` is not accessible: {}", e);
-            print_example_config();
-            println!("Use default config");
-
-            Default::default()
+            println!("Config file `{}` is not accessible: {}", path, e);
+            None
         }
+    }
+}
+
+fn load_config(args: &Args) -> Option<Config> {
+    let connection = config_read::<ConnectionConfig>(&args.connection_file);
+    let keys = config_read::<KeysConfig>(&args.keys_file);
+
+    if let (Some(connection), Some(keys)) = (connection, keys) {
+        Some(Config { connection, keys })
+    } else {
+        None
     }
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    let config = load_config(&args);
+    let config = load_config(&args).expect("Config file not loaded: try type `--help` to get help");
 
     println!("=== loaded config ===");
     println!("{}", serde_yaml_ng::to_string(&config).unwrap());
@@ -226,13 +199,13 @@ async fn main() {
     let mut keyring = Keyring::new();
     let mut filter_by_nodeid: Vec<NodeId> = Default::default();
 
-    for channel in config.channels {
+    for channel in config.keys.channels {
         keyring
             .add_channel(channel.name.as_str(), channel.key)
             .unwrap();
     }
 
-    for peer in config.peers {
+    for peer in config.keys.peers {
         if let Some(skey) = peer.private_key {
             keyring.add_peer(peer.node_id, skey).unwrap();
         } else if let Some(pkey) = peer.public_key {
@@ -244,7 +217,7 @@ async fn main() {
     }
 
     println!();
-    match config.mode {
+    match config.connection.mode {
         Mode::MQTT(mqtt) => {
             println!(
                 "Connect to MQTT {} port {}: {:?}",
