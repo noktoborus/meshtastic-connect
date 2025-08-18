@@ -1,4 +1,5 @@
 use base64::{Engine, engine::general_purpose};
+use rand::Rng;
 use serde::de::{self, Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 use std::fmt;
@@ -13,6 +14,22 @@ pub struct K256(pub [u8; 32]);
 pub enum Key {
     K128(K128),
     K256(K256),
+}
+
+impl Default for K128 {
+    fn default() -> Self {
+        let mut rng = rand::thread_rng();
+
+        K128(rng.random())
+    }
+}
+
+impl Default for K256 {
+    fn default() -> Self {
+        let mut rng = rand::thread_rng();
+
+        K256(rng.random())
+    }
 }
 
 impl K256 {

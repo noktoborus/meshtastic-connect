@@ -1,3 +1,4 @@
+use rand::Rng;
 use serde::de::{self, Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 use std::fmt;
@@ -10,6 +11,14 @@ pub struct NodeId(u32);
 impl NodeId {
     pub fn to_bytes(self) -> [u8; 4] {
         self.0.to_le_bytes()
+    }
+}
+
+impl Default for NodeId {
+    fn default() -> Self {
+        let mut rng = rand::rng();
+
+        NodeId(rng.random())
     }
 }
 
