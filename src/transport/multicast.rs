@@ -5,6 +5,7 @@ use std::{
 
 use bytes::BytesMut;
 use prost::Message;
+use socket2::{Domain, SockRef, Socket};
 use tokio::net::UdpSocket;
 const STREAM_PACKET_SIZE_MAX: u16 = 512;
 use crate::meshtastic::{self, MeshPacket};
@@ -34,15 +35,23 @@ impl Multicast {
         };
 
         let socket = UdpSocket::bind(&[bind_addr][..]).await?;
+        let sock_ref = SockRef::from(&socket);
+        sock_ref.set_reuse_address(true)?;
 
         match self.address {
             SocketAddr::V4(socket_addr_v4) => {
-                socket.join_multicast_v4(*socket_addr_v4.ip(), Ipv4Addr::UNSPECIFIED)?;
+                sock_ref.set_multicast_loop_v4(false)?;
+                sock_ref.set_multicast_ttl_v4(1)?;
+                sock_ref.join_multicast_v4(socket_addr_v4.ip(), &Ipv4Addr::UNSPECIFIED)?;
             }
             SocketAddr::V6(socket_addr_v6) => {
-                socket.join_multicast_v6(socket_addr_v6.ip(), 0)?;
+                sock_ref.set_multicast_loop_v6(false)?;
+                sock_ref.set_multicast_hops_v6(1)?;
+                sock_ref.join_multicast_v6(socket_addr_v6.ip(), 0)?;
             }
         };
+
+        drop(sock_ref);
 
         self.connection = Some(socket);
 

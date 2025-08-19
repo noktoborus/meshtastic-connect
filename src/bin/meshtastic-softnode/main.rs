@@ -62,13 +62,12 @@ async fn main() {
         if channel.node_info.is_some() {
             println!("Send initial nodeinfo to {}", channel.name);
             let dest_node: NodeId = 0xffffffff.into();
-            let channel_no = 0x0;
             let packet_id = 123;
             let node_info = meshtastic::User {
                 id: soft_node.node_id.into(),
                 long_name: soft_node.name.clone(),
                 short_name: soft_node.short_name.clone(),
-                hw_model: 0,
+                hw_model: meshtastic::HardwareModel::AndroidSim.into(),
                 is_licensed: false,
                 role: meshtastic::config::device_config::Role::Client.into(),
                 public_key: vec![],
@@ -79,7 +78,7 @@ async fn main() {
                 payload: node_info.encode_to_vec(),
                 ..Default::default()
             };
-            let cryptor = keyring
+            let (cryptor, channel_hash) = keyring
                 .cryptor_for_channel_name(soft_node.node_id, &channel.name)
                 .unwrap();
             let data = cryptor
@@ -90,13 +89,13 @@ async fn main() {
             let mesh_packet = meshtastic::MeshPacket {
                 from: soft_node.node_id.into(),
                 to: dest_node.into(),
-                channel: channel_no,
+                channel: channel_hash,
                 id: packet_id,
                 rx_time: 0,
                 rx_snr: 0.0,
                 hop_limit: channel.hop_start.into(),
-                want_ack: false,
-                priority: meshtastic::mesh_packet::Priority::Background.into(),
+                want_ack: true,
+                priority: meshtastic::mesh_packet::Priority::Default.into(),
                 rx_rssi: 0,
                 via_mqtt: false,
                 hop_start: channel.hop_start.into(),

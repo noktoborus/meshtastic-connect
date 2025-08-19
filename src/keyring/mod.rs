@@ -45,14 +45,22 @@ impl Keyring {
     }
 
     // Get cryptographic API for channel name
-    pub fn cryptor_for_channel_name(&self, from: NodeId, channel_name: &String) -> Option<Cryptor> {
+    // Returns a tuple containing the cryptographic API and the channel's hash
+    pub fn cryptor_for_channel_name(
+        &self,
+        from: NodeId,
+        channel_name: &String,
+    ) -> Option<(Cryptor, u32)> {
         if let Some(channel) = self.channels.iter().find(|chan| chan.name == *channel_name) {
-            Some(Cryptor::Symmetric(
-                channel.name.clone(),
-                Symmetric {
-                    from,
-                    key: channel.key.clone(),
-                },
+            Some((
+                Cryptor::Symmetric(
+                    channel.name.clone(),
+                    Symmetric {
+                        from,
+                        key: channel.key.clone(),
+                    },
+                ),
+                channel.channel_hash,
             ))
         } else {
             None
