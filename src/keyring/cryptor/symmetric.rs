@@ -1,8 +1,10 @@
 use crate::keyring::key::Key;
 use crate::keyring::node_id::NodeId;
+use aes::cipher::StreamCipherError;
 use aes::{Aes128, Aes256};
 use ctr::Ctr128BE;
 use ctr::cipher::{KeyIvInit, StreamCipher};
+use zerocopy::IntoBytes;
 
 use super::{Decrypt, Encrypt};
 
@@ -24,37 +26,33 @@ fn prepare_nonce(packet_id: u32, from: NodeId) -> [u8; 16] {
     nonce
 }
 
-fn apply_symmetric_decryption<C>(mut cipher: C, data: Vec<u8>) -> Result<Vec<u8>, String>
-where
-    C: StreamCipher,
-{
-    let mut buffer = data;
-    cipher
-        .try_apply_keystream(&mut buffer)
-        .map_err(|e| format!("Unable to decrypt: {:?}", e))?;
+fn crypt(
+    key: &Key,
+    packet_id: u32,
+    from: NodeId,
+    mut buffer: Vec<u8>,
+) -> Result<Vec<u8>, StreamCipherError> {
+    let nonce = prepare_nonce(packet_id, from);
 
+    match key {
+        Key::K128(key) => Ctr128BE::<Aes128>::new(key.as_bytes().into(), &nonce.into())
+            .try_apply_keystream(buffer.as_mut_bytes()),
+        Key::K256(key) => Ctr128BE::<Aes256>::new(key.as_bytes().into(), &nonce.into())
+            .try_apply_keystream(buffer.as_mut_bytes()),
+    }?;
     Ok(buffer)
 }
 
 impl Decrypt for Symmetric {
-    async fn decrypt(&self, packet_id: u32, data: Vec<u8>) -> Result<Vec<u8>, String> {
-        let nonce = prepare_nonce(packet_id, self.from);
-
-        match self.key {
-            Key::K128(key) => {
-                let cipher = Ctr128BE::<Aes128>::new(key.as_bytes().into(), &nonce.into());
-                apply_symmetric_decryption(cipher, data)
-            }
-            Key::K256(key) => {
-                let cipher = Ctr128BE::<Aes256>::new(key.as_bytes().into(), &nonce.into());
-                apply_symmetric_decryption(cipher, data)
-            }
-        }
+    async fn decrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
+        crypt(&self.key, packet_id, self.from, buffer)
+            .map_err(|e| format!("Unable to decrypt: {:?}", e))
     }
 }
 
 impl Encrypt for Symmetric {
-    async fn encrypt(&self, _packet_id: u32, _data: Vec<u8>) -> Result<Vec<u8>, String> {
-        todo!()
+    async fn encrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
+        crypt(&self.key, packet_id, self.from, buffer)
+            .map_err(|e| format!("Unable to encrypt: {:?}", e))
     }
 }

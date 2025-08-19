@@ -46,10 +46,10 @@ pub trait Encrypt {
 }
 
 impl Encrypt for Cryptor {
-    async fn encrypt(&self, packet_id: u32, data: Vec<u8>) -> Result<Vec<u8>, String> {
+    async fn encrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
         match self {
-            Cryptor::Symmetric(_, symmetric) => symmetric.encrypt(packet_id, data).await,
-            Cryptor::PKI(_, pki) => pki.encrypt(packet_id, data).await,
+            Cryptor::Symmetric(_, symmetric) => symmetric.encrypt(packet_id, buffer).await,
+            Cryptor::PKI(_, pki) => pki.encrypt(packet_id, buffer).await,
         }
     }
 }
