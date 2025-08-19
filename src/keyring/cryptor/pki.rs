@@ -1,14 +1,10 @@
-use super::Decrypt;
-use crate::{
-    keyring::{key::K256, node_id::NodeId},
-    meshtastic,
-};
+use super::{Decrypt, Encrypt};
+use crate::keyring::{key::K256, node_id::NodeId};
 use aes::Aes256;
 use ccm::{
     Ccm, KeyInit,
     aead::{self, Aead},
 };
-use prost::Message;
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -47,7 +43,7 @@ fn prepare_nonce(packet_id: u32, from: NodeId, extra_nonce: &[u8; 4]) -> [u8; 16
 }
 
 impl Decrypt for PKI {
-    async fn decrypt(&self, packet_id: u32, data: Vec<u8>) -> Result<meshtastic::Data, String> {
+    async fn decrypt(&self, packet_id: u32, data: Vec<u8>) -> Result<Vec<u8>, String> {
         const AUTH_LEN: usize = 8;
         const EXTRA_NONCE_LEN: usize = 4;
 
@@ -63,7 +59,7 @@ impl Decrypt for PKI {
         )
         .map_err(|e| format!("PKI cipher init failed: {}", e))?;
 
-        let buffer = cipher
+        cipher
             .decrypt(
                 nonce[0..13].into(),
                 aead::Payload {
@@ -71,9 +67,12 @@ impl Decrypt for PKI {
                     aad: &[],
                 },
             )
-            .map_err(|e| format!("PKI decrypt failed: {}", e))?;
+            .map_err(|e| format!("PKI decrypt failed: {}", e))
+    }
+}
 
-        meshtastic::Data::decode(buffer.as_slice())
-            .map_err(|e| format!("PKI failed: Unable to construct `Data`: {}", e))
+impl Encrypt for PKI {
+    async fn encrypt(&self, _packet_id: u32, _data: Vec<u8>) -> Result<Vec<u8>, String> {
+        todo!()
     }
 }

@@ -1,13 +1,10 @@
+use crate::keyring::key::Key;
+use crate::keyring::node_id::NodeId;
 use aes::{Aes128, Aes256};
 use ctr::Ctr128BE;
 use ctr::cipher::{KeyIvInit, StreamCipher};
-use prost::Message;
 
-use crate::keyring::key::Key;
-use crate::keyring::node_id::NodeId;
-use crate::meshtastic;
-
-use super::Decrypt;
+use super::{Decrypt, Encrypt};
 
 // Data to decrypt using symmetric AES
 pub struct Symmetric {
@@ -27,7 +24,7 @@ fn prepare_nonce(packet_id: u32, from: NodeId) -> [u8; 16] {
     nonce
 }
 
-fn apply_symmetric_decryption<C>(mut cipher: C, data: Vec<u8>) -> Result<meshtastic::Data, String>
+fn apply_symmetric_decryption<C>(mut cipher: C, data: Vec<u8>) -> Result<Vec<u8>, String>
 where
     C: StreamCipher,
 {
@@ -36,12 +33,11 @@ where
         .try_apply_keystream(&mut buffer)
         .map_err(|e| format!("Unable to decrypt: {:?}", e))?;
 
-    meshtastic::Data::decode(buffer.as_slice())
-        .map_err(|e| format!("Unable to construct `Data`: {:?}", e))
+    Ok(buffer)
 }
 
 impl Decrypt for Symmetric {
-    async fn decrypt(&self, packet_id: u32, data: Vec<u8>) -> Result<meshtastic::Data, String> {
+    async fn decrypt(&self, packet_id: u32, data: Vec<u8>) -> Result<Vec<u8>, String> {
         let nonce = prepare_nonce(packet_id, self.from);
 
         match self.key {
@@ -54,5 +50,11 @@ impl Decrypt for Symmetric {
                 apply_symmetric_decryption(cipher, data)
             }
         }
+    }
+}
+
+impl Encrypt for Symmetric {
+    async fn encrypt(&self, _packet_id: u32, _data: Vec<u8>) -> Result<Vec<u8>, String> {
+        todo!()
     }
 }

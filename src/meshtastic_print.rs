@@ -1,4 +1,4 @@
-use crate::keyring::decryptor::Decrypt;
+use crate::keyring::cryptor::Decrypt;
 use crate::keyring::node_id::NodeId;
 use crate::{
     keyring::Keyring,
@@ -131,7 +131,7 @@ pub async fn print_mesh_packet(
             meshtastic::mesh_packet::PayloadVariant::Encrypted(items) => {
                 let from = mesh_packet.from.into();
                 let to = mesh_packet.to.into();
-                let decryptor = channel_list.decryptor_for(from, to, mesh_packet.channel);
+                let decryptor = channel_list.cryptor_for(from, to, mesh_packet.channel);
 
                 if decryptor.is_none() {
                     println!(
@@ -144,13 +144,18 @@ pub async fn print_mesh_packet(
                 println!("  <decrypting {} bytes for {}>", items.len(), decryptor);
 
                 match decryptor.decrypt(mesh_packet.id, items).await {
-                    Ok(data) => match print_decoded(data).await {
-                        Ok(_) => {}
+                    Ok(buffer) => match meshtastic::Data::decode(buffer.as_slice()) {
+                        Ok(data) => match print_decoded(data).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                println!("! [print error] {:?}", e)
+                            }
+                        },
                         Err(e) => {
-                            println!("! [construct error] {:?}", e)
+                            println!("! [construct error] Unable to construct `Data`: {:?}", e);
                         }
                     },
-                    Err(e) => println!("! {:?}", e),
+                    Err(e) => println!("! [decode error] {:?}", e),
                 }
             }
         }

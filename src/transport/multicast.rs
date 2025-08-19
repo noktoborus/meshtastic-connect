@@ -67,7 +67,7 @@ impl Multicast {
         }
     }
 
-    async fn send(&mut self, mesh_packet: MeshPacket) -> Result<(), std::io::Error> {
+    pub async fn send(&mut self, mesh_packet: MeshPacket) -> Result<(), std::io::Error> {
         match self.connection {
             None => Err(std::io::Error::new(
                 ErrorKind::NotConnected,
@@ -80,7 +80,7 @@ impl Multicast {
                 mesh_packet
                     .encode(&mut buf)
                     .map_err(|e| std::io::Error::new(ErrorKind::InvalidInput, e.to_string()))?;
-                socket.send(&buf).await?;
+                socket.send_to(&buf, self.address).await?;
                 Ok(())
             }
         }

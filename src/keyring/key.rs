@@ -18,7 +18,7 @@ pub enum Key {
 
 impl Default for K128 {
     fn default() -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         K128(rng.random())
     }
@@ -26,7 +26,7 @@ impl Default for K128 {
 
 impl Default for K256 {
     fn default() -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         K256(rng.random())
     }

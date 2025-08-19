@@ -1,5 +1,5 @@
 mod channel;
-pub mod decryptor;
+pub mod cryptor;
 pub mod key;
 pub mod node_id;
 mod peer;
@@ -7,7 +7,7 @@ mod peer;
 use std::collections::HashMap;
 
 use channel::Channel;
-use decryptor::{Decryptor, pki::PKI, symmetric::Symmetric};
+use cryptor::{Cryptor, pki::PKI, symmetric::Symmetric};
 use key::{K256, Key};
 use node_id::NodeId;
 use peer::Peer;
@@ -44,13 +44,13 @@ impl Keyring {
         Ok(())
     }
 
-    pub fn decryptor_for(&self, from: NodeId, to: NodeId, chan_no: u32) -> Option<Decryptor> {
+    pub fn cryptor_for(&self, from: NodeId, to: NodeId, chan_no: u32) -> Option<Cryptor> {
         if chan_no == 0x0 {
             if let (Some(remote_peer), Some(local_peer)) =
                 (self.peers.get(&from), self.peers.get(&to))
             {
                 if let Some(private_key) = local_peer.private_key {
-                    Some(Decryptor::PKI(
+                    Some(Cryptor::PKI(
                         format!("{} → {}", from, to),
                         PKI::new(from, remote_peer.public_key, private_key),
                     ))
@@ -66,7 +66,7 @@ impl Keyring {
                 .iter()
                 .find(|chan| chan.channel_hash == chan_no)
             {
-                Some(Decryptor::Symmetric(
+                Some(Cryptor::Symmetric(
                     channel.name.clone(),
                     Symmetric {
                         from,
