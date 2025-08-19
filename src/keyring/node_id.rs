@@ -77,3 +77,9 @@ impl fmt::Display for NodeId {
         write!(f, "!{:08x}", self.0)
     }
 }
+
+impl Into<String> for NodeId {
+    fn into(self) -> String {
+        self.to_string()
+    }
+}

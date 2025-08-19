@@ -103,6 +103,7 @@ pub(crate) struct SoftNodeChannel {
 pub(crate) struct SoftNodeConfig {
     pub(crate) bind_address: SocketAddr,
     pub(crate) name: String,
+    pub(crate) short_name: String,
     pub(crate) node_id: NodeId,
     pub(crate) private_key: K256,
     pub(crate) channels: Vec<SoftNodeChannel>,
@@ -113,6 +114,7 @@ impl Default for SoftNodeConfig {
         Self {
             bind_address: "224.0.0.69:4403".parse().unwrap(),
             name: "SoftNode".to_string(),
+            short_name: "SFTN".to_string(),
             node_id: NodeId::default(),
             private_key: K256::default(),
             channels: vec![SoftNodeChannel {

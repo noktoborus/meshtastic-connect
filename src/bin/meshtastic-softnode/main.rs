@@ -57,17 +57,33 @@ async fn main() {
     for channel in &soft_node.channels {
         if channel.node_info.is_some() {
             println!("Send initial nodeinfo to {}", channel.name);
-            let channel_no = 0x8;
+            let dest_node: NodeId = 0xffffffff.into();
+            let channel_no = 0x0;
+            let node_info = meshtastic::User {
+                id: soft_node.node_id.into(),
+                long_name: soft_node.name.clone(),
+                short_name: soft_node.short_name.clone(),
+                hw_model: 0,
+                is_licensed: false,
+                role: meshtastic::config::device_config::Role::Client.into(),
+                public_key: vec![],
+                ..Default::default()
+            };
+            let data = meshtastic::Data {
+                portnum: meshtastic::PortNum::NodeinfoApp.into(),
+                payload: node_info.encode_to_vec(),
+                ..Default::default()
+            };
             let mesh_packet = meshtastic::MeshPacket {
                 from: soft_node.node_id.into(),
-                to: 0xffffffff,
+                to: dest_node.into(),
                 channel: channel_no,
                 id: 0,
                 rx_time: 0,
                 rx_snr: 0.0,
                 hop_limit: channel.hop_start.into(),
                 want_ack: false,
-                priority: 0,
+                priority: meshtastic::mesh_packet::Priority::Background.into(),
                 rx_rssi: 0,
                 via_mqtt: false,
                 hop_start: channel.hop_start.into(),
@@ -76,10 +92,11 @@ async fn main() {
                 next_hop: 0,
                 relay_node: 0,
                 tx_after: 0,
-                payload_variant: None,
-                delayed: 0,
+                payload_variant: Some(mesh_packet::PayloadVariant::Decoded(data)),
+                ..Default::default()
             };
 
+            println!("send mesh: {:?}", mesh_packet);
             connection.send(mesh_packet).await.unwrap();
         }
     }
@@ -87,6 +104,7 @@ async fn main() {
     loop {
         let (mesh_packet, _) = connection.recv().await.unwrap();
 
+        println!("packet received");
         // print_mesh_packet(mesh_packet, &keyring, &filter_by_nodeid).await;
 
         println!();
