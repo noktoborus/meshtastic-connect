@@ -44,38 +44,63 @@ impl Keyring {
         Ok(())
     }
 
-    pub fn cryptor_for(&self, from: NodeId, to: NodeId, chan_no: u32) -> Option<Cryptor> {
-        if chan_no == 0x0 {
-            if let (Some(remote_peer), Some(local_peer)) =
-                (self.peers.get(&from), self.peers.get(&to))
-            {
-                if let Some(private_key) = local_peer.private_key {
-                    Some(Cryptor::PKI(
-                        format!("{} → {}", from, to),
-                        PKI::new(from, remote_peer.public_key, private_key),
-                    ))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+    // Get cryptographic API for channel name
+    pub fn cryptor_for_channel_name(&self, from: NodeId, channel_name: &String) -> Option<Cryptor> {
+        if let Some(channel) = self.channels.iter().find(|chan| chan.name == *channel_name) {
+            Some(Cryptor::Symmetric(
+                channel.name.clone(),
+                Symmetric {
+                    from,
+                    key: channel.key.clone(),
+                },
+            ))
         } else {
-            if let Some(channel) = self
-                .channels
-                .iter()
-                .find(|chan| chan.channel_hash == chan_no)
-            {
-                Some(Cryptor::Symmetric(
-                    channel.name.clone(),
-                    Symmetric {
-                        from,
-                        key: channel.key.clone(),
-                    },
+            None
+        }
+    }
+
+    // Get cryptographic API for pair of nodes
+    pub fn cryptor_for_pki(&self, from: NodeId, to: NodeId) -> Option<Cryptor> {
+        if let (Some(remote_peer), Some(local_peer)) = (self.peers.get(&from), self.peers.get(&to))
+        {
+            if let Some(private_key) = local_peer.private_key {
+                Some(Cryptor::PKI(
+                    format!("{} → {}", from, to),
+                    PKI::new(from, remote_peer.public_key, private_key),
                 ))
             } else {
                 None
             }
+        } else {
+            None
+        }
+    }
+
+    // Get cryptographic API for channel from `MeshPacket::channel` field
+    pub fn cryptor_for_channel(&self, from: NodeId, channel: u32) -> Option<Cryptor> {
+        if let Some(channel) = self
+            .channels
+            .iter()
+            .find(|chan| chan.channel_hash == channel)
+        {
+            Some(Cryptor::Symmetric(
+                channel.name.clone(),
+                Symmetric {
+                    from,
+                    key: channel.key.clone(),
+                },
+            ))
+        } else {
+            None
+        }
+    }
+
+    // Get cryptographic API for `MeshPacket::channel` field
+    pub fn cryptor_for(&self, from: NodeId, to: NodeId, channel: u32) -> Option<Cryptor> {
+        if channel == 0x0 {
+            self.cryptor_for_pki(from, to)
+        } else {
+            self.cryptor_for_channel(from, channel)
         }
     }
 }

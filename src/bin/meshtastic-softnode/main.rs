@@ -3,7 +3,11 @@ mod config;
 use clap::Parser;
 use config::MQTTConfig;
 use meshtastic_connect::{
-    keyring::{Keyring, cryptor::Decrypt, node_id::NodeId},
+    keyring::{
+        Keyring,
+        cryptor::{Decrypt, Encrypt},
+        node_id::NodeId,
+    },
     meshtastic::{self, ServiceEnvelope, mesh_packet},
     transport::multicast::Multicast,
 };
@@ -59,6 +63,7 @@ async fn main() {
             println!("Send initial nodeinfo to {}", channel.name);
             let dest_node: NodeId = 0xffffffff.into();
             let channel_no = 0x0;
+            let packet_id = 123;
             let node_info = meshtastic::User {
                 id: soft_node.node_id.into(),
                 long_name: soft_node.name.clone(),
@@ -74,11 +79,19 @@ async fn main() {
                 payload: node_info.encode_to_vec(),
                 ..Default::default()
             };
+            let cryptor = keyring
+                .cryptor_for_channel_name(soft_node.node_id, &channel.name)
+                .unwrap();
+            let data = cryptor
+                .encrypt(packet_id, data.encode_to_vec())
+                .await
+                .unwrap();
+
             let mesh_packet = meshtastic::MeshPacket {
                 from: soft_node.node_id.into(),
                 to: dest_node.into(),
                 channel: channel_no,
-                id: 0,
+                id: packet_id,
                 rx_time: 0,
                 rx_snr: 0.0,
                 hop_limit: channel.hop_start.into(),
@@ -92,7 +105,7 @@ async fn main() {
                 next_hop: 0,
                 relay_node: 0,
                 tx_after: 0,
-                payload_variant: Some(mesh_packet::PayloadVariant::Decoded(data)),
+                payload_variant: Some(mesh_packet::PayloadVariant::Encrypted(data)),
                 ..Default::default()
             };
 

@@ -132,10 +132,22 @@ pub(crate) struct ConnectionConfig {
     pub(crate) mqtt: MQTTConfig,
 }
 
-#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct KeyringConfig {
     pub(crate) channels: Vec<Channel>,
     pub(crate) peers: Vec<Peer>,
+}
+
+impl Default for KeyringConfig {
+    fn default() -> Self {
+        Self {
+            channels: vec![Channel {
+                name: "LongFast".into(),
+                key: "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
+            }],
+            peers: vec![],
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]

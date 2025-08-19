@@ -74,7 +74,6 @@ impl Multicast {
                 "Not joined to multicast",
             )),
             Some(ref mut socket) => {
-                static PACKET_BUFFER: usize = STREAM_PACKET_SIZE_MAX as usize * 2;
                 let mut buf = BytesMut::new();
 
                 mesh_packet
