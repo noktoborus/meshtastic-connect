@@ -1,5 +1,5 @@
 use serde::{
-    Deserialize, Deserializer, Serialize, Serializer,
+    Deserialize, Deserializer, Serialize,
     de::{self, DeserializeOwned},
 };
 use serde_yaml_ng::{from_reader, to_writer};
@@ -11,7 +11,7 @@ use meshtastic_connect::keyring::{
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     time::Duration,
 };
 
@@ -72,9 +72,9 @@ impl Default for Hops {
     }
 }
 
-impl Into<u32> for Hops {
-    fn into(self) -> u32 {
-        self.0.into()
+impl From<Hops> for u32 {
+    fn from(val: Hops) -> Self {
+        val.0.into()
     }
 }
 
@@ -100,19 +100,79 @@ pub(crate) struct SoftNodeChannel {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub(crate) enum StreamVariant {
+    TCP(SocketAddr),
+    Serial(String),
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
+pub(crate) struct MulticastBindAddr(SocketAddr);
+
+impl TryFrom<String> for MulticastBindAddr {
+    type Error = std::net::AddrParseError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Ok(Self(s.parse::<SocketAddr>()?))
+    }
+}
+
+impl TryFrom<&str> for MulticastBindAddr {
+    type Error = std::net::AddrParseError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Ok(Self(s.parse::<SocketAddr>()?))
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
+pub(crate) struct MulticastBind {
+    // Bind address for receiving multicast packets
+    pub(crate) address: MulticastBindAddr,
+
+    // Interface index to send multicast packets
+    pub(crate) interface: IpAddr,
+}
+
+impl Default for MulticastBind {
+    fn default() -> Self {
+        Self {
+            address: "224.0.0.69:4403".try_into().unwrap(),
+            interface: "0.0.0.0".parse().unwrap(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub(crate) enum SoftNodeTransport {
+    Multicast(MulticastBind),
+    Stream(StreamVariant),
+}
+
+impl Default for SoftNodeTransport {
+    fn default() -> Self {
+        Self::Multicast(Default::default())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct SoftNodeConfig {
-    pub(crate) bind_address: SocketAddr,
+    pub(crate) transport: SoftNodeTransport,
+    #[serde(default)]
     pub(crate) name: String,
+    #[serde(default)]
     pub(crate) short_name: String,
+    #[serde(default)]
     pub(crate) node_id: NodeId,
+    #[serde(default)]
     pub(crate) private_key: K256,
+    #[serde(default)]
     pub(crate) channels: Vec<SoftNodeChannel>,
 }
 
 impl Default for SoftNodeConfig {
     fn default() -> Self {
         Self {
-            bind_address: "224.0.0.69:4403".parse().unwrap(),
+            transport: Default::default(),
             name: "SoftNode".to_string(),
             short_name: "SFTN".to_string(),
             node_id: NodeId::default(),
@@ -124,12 +184,6 @@ impl Default for SoftNodeConfig {
             }],
         }
     }
-}
-
-#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub(crate) struct ConnectionConfig {
-    pub(crate) soft_node: SoftNodeConfig,
-    pub(crate) mqtt: MQTTConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -152,7 +206,7 @@ impl Default for KeyringConfig {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct Config {
-    pub(crate) connection: ConnectionConfig,
+    pub(crate) soft_node: SoftNodeConfig,
     pub(crate) keys: KeyringConfig,
 }
 
@@ -212,15 +266,15 @@ where
 }
 
 pub(crate) fn load_config(args: &Args) -> Option<Config> {
-    let connection = if let Some(connection) = config_read::<ConnectionConfig>(&args.main_file) {
-        connection
+    let soft_node = if let Some(soft_node) = config_read::<SoftNodeConfig>(&args.main_file) {
+        soft_node
     } else {
         println!("Connection config not found, write default");
-        let connection = Default::default();
-        if let Err(e) = config_write(&args.main_file, &connection) {
+        let soft_node = Default::default();
+        if let Err(e) = config_write(&args.main_file, &soft_node) {
             println!("Failed to write default connection config: {}", e);
         }
-        connection
+        soft_node
     };
 
     let keys = if let Some(keys) = config_read::<KeyringConfig>(&args.keys_file) {
@@ -235,5 +289,5 @@ pub(crate) fn load_config(args: &Args) -> Option<Config> {
         keys
     };
 
-    Some(Config { connection, keys })
+    Some(Config { soft_node, keys })
 }

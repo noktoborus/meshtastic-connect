@@ -9,7 +9,7 @@ use meshtastic_connect::{
         node_id::NodeId,
     },
     meshtastic::{self, ServiceEnvelope, mesh_packet},
-    transport::multicast::Multicast,
+    transport::{if_index_by_addr, multicast::Multicast},
 };
 
 use crate::config::Args;
@@ -51,10 +51,15 @@ async fn main() {
     }
 
     println!();
-    let soft_node = config.connection.soft_node;
-    let bind_address = soft_node.bind_address;
-    println!("Listen multicast on {}", bind_address);
-    let mut connection = Multicast::new(bind_address);
+    let soft_node = config.soft_node;
+    // let bind_address = soft_node.bind_address;
+    let if_index =
+        if_index_by_addr(&std::net::IpAddr::V4("10.72.46.170".parse().unwrap())).unwrap();
+    println!(
+        "Listen multicast on {} (if_index {})",
+        "224.0.0.69:4403", if_index
+    );
+    let mut connection = Multicast::new("224.0.0.69:4403".parse().unwrap(), 0);
 
     connection.connect().await.unwrap();
 
@@ -91,8 +96,8 @@ async fn main() {
                 to: dest_node.into(),
                 channel: channel_hash,
                 id: packet_id,
-                rx_time: 0,
-                rx_snr: 0.0,
+                rx_time: 1755713559,
+                rx_snr: 3.0,
                 hop_limit: channel.hop_start.into(),
                 want_ack: true,
                 priority: meshtastic::mesh_packet::Priority::Default.into(),
@@ -121,18 +126,6 @@ async fn main() {
 
         println!();
     }
-    // let (client_b, mut eventloop_b) = build_connection(config.connection.mqtt_b).await;
-
-    // loop {
-    //     select! {
-    //         notification = eventloop_a.poll() => {
-    //             handle_notifications(notification.unwrap(), &keyring, &client_b).await
-    //         }
-    //         notification = eventloop_b.poll() => {
-    //             handle_notifications(notification.unwrap(), &keyring, &client_a).await
-    //         }
-    //     }
-    // }
 }
 
 async fn mesh_packet_get_portnum(

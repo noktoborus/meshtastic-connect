@@ -4,8 +4,9 @@ use std::{
 };
 
 use bytes::BytesMut;
+use getifaddrs::{Interfaces, getifaddrs};
 use prost::Message;
-use socket2::{Domain, SockRef, Socket};
+use socket2::SockRef;
 use tokio::net::UdpSocket;
 const STREAM_PACKET_SIZE_MAX: u16 = 512;
 use crate::meshtastic::{self, MeshPacket};
@@ -13,13 +14,15 @@ use crate::meshtastic::{self, MeshPacket};
 #[derive(Debug)]
 pub struct Multicast {
     pub address: SocketAddr,
+    pub interface: u32,
     connection: Option<UdpSocket>,
 }
 
 impl Multicast {
-    pub fn new(address: SocketAddr) -> Self {
+    pub fn new(address: SocketAddr, interface: u32) -> Self {
         Self {
             address,
+            interface,
             connection: None,
         }
     }
@@ -42,12 +45,16 @@ impl Multicast {
             SocketAddr::V4(socket_addr_v4) => {
                 sock_ref.set_multicast_loop_v4(false)?;
                 sock_ref.set_multicast_ttl_v4(1)?;
-                sock_ref.join_multicast_v4(socket_addr_v4.ip(), &Ipv4Addr::UNSPECIFIED)?;
+                sock_ref.join_multicast_v4_n(
+                    socket_addr_v4.ip(),
+                    &socket2::InterfaceIndexOrAddress::Index(self.interface),
+                )?;
             }
             SocketAddr::V6(socket_addr_v6) => {
                 sock_ref.set_multicast_loop_v6(false)?;
                 sock_ref.set_multicast_hops_v6(1)?;
-                sock_ref.join_multicast_v6(socket_addr_v6.ip(), 0)?;
+
+                sock_ref.join_multicast_v6(socket_addr_v6.ip(), self.interface)?;
             }
         };
 

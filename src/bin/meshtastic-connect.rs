@@ -282,7 +282,7 @@ async fn main() {
         }
         Mode::Multicast(multicast) => {
             println!("Listen multicast on {}", multicast.listen_address);
-            let mut connection = Multicast::new(multicast.listen_address);
+            let mut connection = Multicast::new(multicast.listen_address, 0);
 
             connection.connect().await.unwrap();
             loop {
