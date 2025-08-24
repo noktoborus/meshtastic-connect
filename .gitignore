@@ -1,5 +1,5 @@
 /target
-/connection.yaml
+/connect.yaml
 /softnode.yaml
 /keys.yaml
 # Added by cargo

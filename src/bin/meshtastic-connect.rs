@@ -26,7 +26,7 @@ use tokio::io::AsyncWriteExt;
 #[command(version, about, long_about = None)]
 struct Args {
     // Path to config file
-    #[arg(short, long, default_value_t = String::from("connection.yaml"))]
+    #[arg(short, long, default_value_t = String::from("connect.yaml"))]
     connection_file: String,
     // Path to file with keys to decode Peers and Channels messages
     #[arg(short, long, default_value_t = String::from("keys.yaml"))]
