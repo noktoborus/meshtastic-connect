@@ -100,7 +100,9 @@ impl Multicast {
         }
     }
 
-    async fn disconnect(&mut self) {
-        self.connection = None;
+    pub async fn disconnect(&mut self) {
+        if let Some(connection) = self.connection.take() {
+            drop(connection);
+        }
     }
 }

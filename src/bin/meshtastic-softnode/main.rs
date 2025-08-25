@@ -9,14 +9,80 @@ use meshtastic_connect::{
         node_id::NodeId,
     },
     meshtastic::{self, ServiceEnvelope, mesh_packet},
-    transport::{if_index_by_addr, multicast::Multicast},
+    transport::{self, if_index_by_addr, multicast::Multicast, stream::Stream},
 };
+use tokio::io::AsyncWriteExt;
 
 use crate::config::Args;
 use crate::config::load_config;
 use prost::Message;
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Publish, QoS};
-use std::{process, time::Duration};
+use std::{net::ToSocketAddrs, process, time::Duration};
+
+enum Connection {
+    Multicast(Multicast),
+    Stream(Stream),
+}
+
+enum RecvData {
+    MeshPacket(meshtastic::MeshPacket),
+    Unstructured(Vec<u8>),
+}
+
+impl Connection {
+    async fn connect(&mut self) -> Result<(), std::io::Error> {
+        match self {
+            Connection::Multicast(multicast) => multicast.connect().await,
+            Connection::Stream(stream) => stream.connect().await,
+        }
+    }
+
+    async fn disconnect(&mut self) {
+        match self {
+            Connection::Multicast(multicast) => multicast.disconnect().await,
+            Connection::Stream(stream) => stream.disconnect().await,
+        }
+    }
+
+    async fn send_mesh(
+        &mut self,
+        mesh_packet: meshtastic::MeshPacket,
+    ) -> Result<(), std::io::Error> {
+        match self {
+            Connection::Multicast(multicast) => multicast.send(mesh_packet).await,
+            Connection::Stream(stream) => {
+                let to_radio = meshtastic::to_radio::PayloadVariant::Packet(mesh_packet);
+                stream.send(to_radio).await
+            }
+        }
+    }
+
+    async fn recv_mesh(&mut self) -> Result<RecvData, Box<dyn std::error::Error>> {
+        match self {
+            Connection::Multicast(multicast) => {
+                let (mesh_packet, _) = multicast.recv().await?;
+                Ok(RecvData::MeshPacket(mesh_packet))
+            }
+            Connection::Stream(stream) => match stream.recv().await? {
+                transport::stream::StreamData::Packet(from_radio) => {
+                    if let Some(payload_variant) = from_radio.payload_variant {
+                        match payload_variant {
+                            meshtastic::from_radio::PayloadVariant::Packet(mesh_packet) => {
+                                Ok(RecvData::MeshPacket(mesh_packet))
+                            }
+                            _ => Ok(RecvData::Unstructured("got not mesh packet".into())),
+                        }
+                    } else {
+                        Err("No payload variant".into())
+                    }
+                }
+                transport::stream::StreamData::Unstructured(bytes_mut) => {
+                    Ok(RecvData::Unstructured(bytes_mut.to_vec()))
+                }
+            },
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -52,14 +118,24 @@ async fn main() {
 
     println!();
     let soft_node = config.soft_node;
-    // let bind_address = soft_node.bind_address;
-    let if_index =
-        if_index_by_addr(&std::net::IpAddr::V4("10.72.46.170".parse().unwrap())).unwrap();
-    println!(
-        "Listen multicast on {} (if_index {})",
-        "224.0.0.69:4403", if_index
-    );
-    let mut connection = Multicast::new("224.0.0.69:4403".parse().unwrap(), 0);
+    let mut connection = match soft_node.transport {
+        config::SoftNodeTransport::Multicast(multicast_bind) => {
+            let if_index = if_index_by_addr(&multicast_bind.interface).unwrap();
+            println!(
+                "Listen multicast on {} (if {} index {})",
+                multicast_bind.address, multicast_bind.interface, if_index,
+            );
+            Connection::Multicast(Multicast::new(multicast_bind.address.into(), if_index))
+        }
+        config::SoftNodeTransport::TCP(stream_address) => Connection::Stream(Stream::new(
+            transport::stream::StreamAddress::TCPSocket(stream_address),
+            Duration::from_secs(10),
+        )),
+        config::SoftNodeTransport::Serial(serial) => Connection::Stream(Stream::new(
+            transport::stream::StreamAddress::Serial(serial),
+            Duration::from_secs(10),
+        )),
+    };
 
     connection.connect().await.unwrap();
 
@@ -114,14 +190,23 @@ async fn main() {
             };
 
             println!("send mesh: {:?}", mesh_packet);
-            connection.send(mesh_packet).await.unwrap();
+            connection.send_mesh(mesh_packet).await.unwrap();
         }
     }
 
     loop {
-        let (mesh_packet, _) = connection.recv().await.unwrap();
+        match connection.recv_mesh().await {
+            Ok(recv_data) => match recv_data {
+                RecvData::MeshPacket(mesh_packet) => {
+                    println!("received mesh packet: {:?}", mesh_packet);
+                }
+                RecvData::Unstructured(items) => {
+                    tokio::io::stderr().write_all(&items).await.unwrap()
+                }
+            },
+            Err(err) => println!("handle error: {}", err),
+        }
 
-        println!("packet received");
         // print_mesh_packet(mesh_packet, &keyring, &filter_by_nodeid).await;
 
         println!();

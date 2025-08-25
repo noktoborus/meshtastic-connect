@@ -1,6 +1,7 @@
 use bytes::{BufMut, BytesMut};
 use futures::SinkExt;
 use prost::Message;
+use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -152,13 +153,13 @@ impl Encoder<meshtastic::to_radio::PayloadVariant> for RadioCodec {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Serial {
     pub tty: String,
     pub baudrate: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StreamAddress {
     TCPSocket(SocketAddr),
     Serial(Serial),

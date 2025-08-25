@@ -4,9 +4,12 @@ use serde::{
 };
 use serde_yaml_ng::{from_reader, to_writer};
 
-use meshtastic_connect::keyring::{
-    key::{K256, Key},
-    node_id::NodeId,
+use meshtastic_connect::{
+    keyring::{
+        key::{K256, Key},
+        node_id::NodeId,
+    },
+    transport::stream::{Serial, StreamAddress},
 };
 use std::{
     fs::File,
@@ -99,12 +102,6 @@ pub(crate) struct SoftNodeChannel {
     pub(crate) hop_start: Hops,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub(crate) enum StreamVariant {
-    TCP(SocketAddr),
-    Serial(String),
-}
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 pub(crate) struct MulticastBindAddr(SocketAddr);
 
@@ -121,6 +118,18 @@ impl TryFrom<&str> for MulticastBindAddr {
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         Ok(Self(s.parse::<SocketAddr>()?))
+    }
+}
+
+impl std::fmt::Display for MulticastBindAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Into<SocketAddr> for MulticastBindAddr {
+    fn into(self) -> SocketAddr {
+        self.0
     }
 }
 
@@ -145,7 +154,8 @@ impl Default for MulticastBind {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) enum SoftNodeTransport {
     Multicast(MulticastBind),
-    Stream(StreamVariant),
+    TCP(SocketAddr),
+    Serial(Serial),
 }
 
 impl Default for SoftNodeTransport {
@@ -238,7 +248,7 @@ where
     }
 }
 
-pub(crate) fn config_read<T>(path: &String) -> Option<T>
+pub(crate) fn config_read<T>(path: &String) -> Result<Option<T>, serde_yaml_ng::Error>
 where
     T: DeserializeOwned,
 {
@@ -247,47 +257,62 @@ where
         Ok(file) => {
             let reader = BufReader::new(file);
 
-            match from_reader::<_, T>(reader) {
-                Ok(config) => {
-                    println!("... ok");
-                    Some(config)
-                }
-                Err(e) => {
-                    println!("Config file `{}` not loaded: {}", path, e);
-                    None
-                }
-            }
+            Ok(Some(from_reader::<_, T>(reader)?))
         }
         Err(e) => {
             println!("Config file `{}` is not accessible: {}", path, e);
-            None
+            Ok(None)
         }
     }
 }
 
 pub(crate) fn load_config(args: &Args) -> Option<Config> {
-    let soft_node = if let Some(soft_node) = config_read::<SoftNodeConfig>(&args.main_file) {
-        soft_node
-    } else {
-        println!("Connection config not found, write default");
-        let soft_node = Default::default();
-        if let Err(e) = config_write(&args.main_file, &soft_node) {
-            println!("Failed to write default connection config: {}", e);
+    let soft_node = match config_read::<SoftNodeConfig>(&args.main_file) {
+        Ok(soft_node_or_not) => {
+            if let Some(soft_node) = soft_node_or_not {
+                Some(soft_node)
+            } else {
+                println!("Connection config not found, write default");
+                let soft_node = Default::default();
+                if let Err(e) = config_write(&args.main_file, &soft_node) {
+                    println!("Failed to write default connection config: {}", e);
+                }
+                Some(soft_node)
+            }
         }
-        soft_node
+        Err(e) => {
+            println!("Failed to parse {}: {}", args.main_file, e);
+            None
+        }
     };
 
-    let keys = if let Some(keys) = config_read::<KeyringConfig>(&args.keys_file) {
-        println!("Keys config loaded");
-        keys
-    } else {
-        println!("Key config not loaded, write default");
-        let keys = Default::default();
-        if let Err(e) = config_write(&args.keys_file, &keys) {
-            println!("Failed to write default key config: {}", e);
+    let keys = match config_read::<KeyringConfig>(&args.keys_file) {
+        Ok(keys_or_not) => {
+            if let Some(keys) = keys_or_not {
+                println!("Keys config loaded");
+                Some(keys)
+            } else {
+                println!("Key config not loaded, write default");
+                let keys = Default::default();
+                if let Err(e) = config_write(&args.keys_file, &keys) {
+                    println!("Failed to write default key config: {}", e);
+                }
+                Some(keys)
+            }
         }
-        keys
+        Err(e) => {
+            println!("Failed to parse {}: {}", args.keys_file, e);
+            None
+        }
     };
 
-    Some(Config { soft_node, keys })
+    if !keys.is_some() || !soft_node.is_some() {
+        println!("Soft node config not loaded");
+        None
+    } else {
+        Some(Config {
+            soft_node: soft_node.unwrap(),
+            keys: keys.unwrap(),
+        })
+    }
 }
