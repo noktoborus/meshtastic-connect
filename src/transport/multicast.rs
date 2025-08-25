@@ -4,7 +4,6 @@ use std::{
 };
 
 use bytes::BytesMut;
-use getifaddrs::{Interfaces, getifaddrs};
 use prost::Message;
 use socket2::SockRef;
 use tokio::net::UdpSocket;
