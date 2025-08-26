@@ -9,7 +9,7 @@ use meshtastic_connect::{
         key::{K256, Key},
         node_id::NodeId,
     },
-    transport::stream::{Serial, StreamAddress},
+    transport::stream::Serial,
 };
 use std::{
     fs::File,

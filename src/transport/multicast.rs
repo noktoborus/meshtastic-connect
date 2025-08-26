@@ -10,15 +10,30 @@ use tokio::net::UdpSocket;
 const STREAM_PACKET_SIZE_MAX: u16 = 512;
 use crate::meshtastic::{self, MeshPacket};
 
+#[derive(Debug, Clone, Copy)]
+pub struct Interface {
+    pub address: IpAddr,
+    pub index: u32,
+}
+
+impl Interface {
+    pub fn unspecified() -> Self {
+        Self {
+            address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            index: 0,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Multicast {
     pub address: SocketAddr,
-    pub interface: u32,
+    pub interface: Interface,
     connection: Option<UdpSocket>,
 }
 
 impl Multicast {
-    pub fn new(address: SocketAddr, interface: u32) -> Self {
+    pub fn new(address: SocketAddr, interface: Interface) -> Self {
         Self {
             address,
             interface,
@@ -44,16 +59,30 @@ impl Multicast {
             SocketAddr::V4(socket_addr_v4) => {
                 sock_ref.set_multicast_loop_v4(false)?;
                 sock_ref.set_multicast_ttl_v4(1)?;
-                sock_ref.join_multicast_v4_n(
-                    socket_addr_v4.ip(),
-                    &socket2::InterfaceIndexOrAddress::Index(self.interface),
-                )?;
+                match self.interface.address {
+                    IpAddr::V4(ipv4_addr) => {
+                        sock_ref.join_multicast_v4(socket_addr_v4.ip(), &ipv4_addr)?;
+                        sock_ref.set_multicast_if_v4(&ipv4_addr)?;
+                    }
+                    IpAddr::V6(ipv6_addr) => {
+                        if ipv6_addr.is_unspecified() {
+                            sock_ref
+                                .join_multicast_v4(socket_addr_v4.ip(), &Ipv4Addr::UNSPECIFIED)?;
+                        } else {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                "IPv6 Address is not suitable for IPv4 multicast",
+                            ));
+                        }
+                    }
+                }
             }
             SocketAddr::V6(socket_addr_v6) => {
                 sock_ref.set_multicast_loop_v6(false)?;
                 sock_ref.set_multicast_hops_v6(1)?;
 
-                sock_ref.join_multicast_v6(socket_addr_v6.ip(), self.interface)?;
+                sock_ref.join_multicast_v6(socket_addr_v6.ip(), self.interface.index)?;
+                sock_ref.set_multicast_if_v6(self.interface.index)?;
             }
         };
 

@@ -9,7 +9,11 @@ use meshtastic_connect::{
         node_id::NodeId,
     },
     meshtastic::{self, ServiceEnvelope, mesh_packet},
-    transport::{self, if_index_by_addr, multicast::Multicast, stream::Stream},
+    transport::{
+        self, if_index_by_addr,
+        multicast::{Interface, Multicast},
+        stream::Stream,
+    },
 };
 use rand::Rng;
 use tokio::io::AsyncWriteExt;
@@ -165,12 +169,15 @@ async fn main() {
     let soft_node = config.soft_node;
     let mut connection = match soft_node.transport {
         config::SoftNodeTransport::Multicast(multicast_bind) => {
-            let if_index = if_index_by_addr(&multicast_bind.interface).unwrap();
+            let interface = Interface {
+                address: multicast_bind.interface,
+                index: if_index_by_addr(&multicast_bind.interface).unwrap(),
+            };
             println!(
-                "Listen multicast on {} (if {} index {})",
-                multicast_bind.address, multicast_bind.interface, if_index,
+                "Listen multicast on {} ({:?})",
+                multicast_bind.address, interface,
             );
-            Connection::Multicast(Multicast::new(multicast_bind.address.into(), if_index))
+            Connection::Multicast(Multicast::new(multicast_bind.address.into(), interface))
         }
         config::SoftNodeTransport::TCP(stream_address) => Connection::Stream(Stream::new(
             transport::stream::StreamAddress::TCPSocket(stream_address),
