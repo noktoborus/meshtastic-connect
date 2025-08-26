@@ -11,6 +11,7 @@ use meshtastic_connect::{
     meshtastic::{self, ServiceEnvelope, mesh_packet},
     transport::{self, if_index_by_addr, multicast::Multicast, stream::Stream},
 };
+use rand::Rng;
 use tokio::io::AsyncWriteExt;
 
 use crate::config::Args;
@@ -51,7 +52,23 @@ impl Connection {
         match self {
             Connection::Multicast(multicast) => multicast.send(mesh_packet).await,
             Connection::Stream(stream) => {
-                let to_radio = meshtastic::to_radio::PayloadVariant::Packet(mesh_packet);
+                let gateway_id = NodeId::from(mesh_packet.id);
+                let service_envelope = ServiceEnvelope {
+                    packet: Some(mesh_packet),
+                    channel_id: "devel".into(),
+                    gateway_id: gateway_id.into(),
+                };
+                let mqtt_proxy = meshtastic::MqttClientProxyMessage {
+                    topic: "devel".into(),
+                    retained: false,
+                    payload_variant: Some(
+                        meshtastic::mqtt_client_proxy_message::PayloadVariant::Data(
+                            service_envelope.encode_to_vec(),
+                        ),
+                    ),
+                };
+                let to_radio =
+                    meshtastic::to_radio::PayloadVariant::MqttClientProxyMessage(mqtt_proxy);
                 stream.send(to_radio).await
             }
         }
@@ -68,7 +85,35 @@ impl Connection {
                     if let Some(payload_variant) = from_radio.payload_variant {
                         match payload_variant {
                             meshtastic::from_radio::PayloadVariant::Packet(mesh_packet) => {
-                                Ok(RecvData::MeshPacket(mesh_packet))
+                                // Ok(RecvData::MeshPacket(mesh_packet))
+                                Ok(RecvData::Unstructured(
+                                    format!("Receive transport's mesh packet").into(),
+                                ))
+                            }
+                            meshtastic::from_radio::PayloadVariant::MqttClientProxyMessage(
+                                mqtt_proxy_msg,
+                            ) => {
+                                if let Some(payload_variant) = mqtt_proxy_msg.payload_variant {
+                                    match payload_variant {
+                                        meshtastic::mqtt_client_proxy_message::PayloadVariant::Data(items) => {
+                                            match meshtastic::ServiceEnvelope::decode(items.as_slice()) {
+                                                Ok(service_envelope) => {
+                                                    if let Some(mesh_packet) = service_envelope.packet {
+                                                        Ok(RecvData::MeshPacket(mesh_packet))
+                                                    } else {
+                                                        Ok(RecvData::Unstructured(format!("MQTT ServiceEnvelope: no Packet").into()))
+                                                    }
+                                                },
+                                                Err(e) =>  Ok(RecvData::Unstructured(format!("MQTT ServiceEnvelope::decode: {e}").into())),
+                                            }
+
+
+                                        },
+                                        meshtastic::mqtt_client_proxy_message::PayloadVariant::Text(text) => Ok(RecvData::Unstructured(format!("MQTT proto: got text: {:?}", text).into())),
+                                    }
+                                } else {
+                                    Ok(RecvData::Unstructured("MQTT proto: no payload data".into()))
+                                }
                             }
                             _ => Ok(RecvData::Unstructured("got not mesh packet".into())),
                         }
@@ -143,7 +188,7 @@ async fn main() {
         if channel.node_info.is_some() {
             println!("Send initial nodeinfo to {}", channel.name);
             let dest_node: NodeId = 0xffffffff.into();
-            let packet_id = 123;
+            let packet_id = rand::rng().random();
             let node_info = meshtastic::User {
                 id: soft_node.node_id.into(),
                 long_name: soft_node.name.clone(),
@@ -199,17 +244,19 @@ async fn main() {
             Ok(recv_data) => match recv_data {
                 RecvData::MeshPacket(mesh_packet) => {
                     println!("received mesh packet: {:?}", mesh_packet);
+                    println!();
                 }
                 RecvData::Unstructured(items) => {
                     tokio::io::stderr().write_all(&items).await.unwrap()
                 }
             },
-            Err(err) => println!("handle error: {}", err),
+            Err(err) => {
+                println!("handle error: {}", err);
+                println!();
+            }
         }
 
         // print_mesh_packet(mesh_packet, &keyring, &filter_by_nodeid).await;
-
-        println!();
     }
 }
 
