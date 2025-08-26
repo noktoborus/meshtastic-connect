@@ -317,7 +317,6 @@ async fn connect_to_stream(
             }
             stream::StreamData::Unstructured(bytes) => {
                 tokio::io::stderr().write_all(&bytes).await.unwrap();
-                println!("\x1b[0m");
             }
         }
     }
