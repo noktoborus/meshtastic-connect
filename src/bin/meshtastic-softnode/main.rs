@@ -17,7 +17,7 @@ use crate::config::Args;
 use crate::config::load_config;
 use prost::Message;
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Publish, QoS};
-use std::{net::ToSocketAddrs, process, time::Duration};
+use std::{process, time::Duration};
 
 enum Connection {
     Multicast(Multicast),
