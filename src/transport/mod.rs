@@ -1,8 +1,8 @@
 use getifaddrs::{Interfaces, getifaddrs};
 use std::net::IpAddr;
 
-pub mod multicast;
 pub mod stream;
+pub mod udp;
 
 pub fn if_index_by_addr(if_address: &IpAddr) -> Result<u32, std::io::Error> {
     if if_address.is_unspecified() {

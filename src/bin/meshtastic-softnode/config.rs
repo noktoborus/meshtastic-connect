@@ -103,64 +103,49 @@ pub(crate) struct SoftNodeChannel {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
-pub(crate) struct MulticastBindAddr(SocketAddr);
-
-impl TryFrom<String> for MulticastBindAddr {
-    type Error = std::net::AddrParseError;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        Ok(Self(s.parse::<SocketAddr>()?))
-    }
-}
-
-impl TryFrom<&str> for MulticastBindAddr {
-    type Error = std::net::AddrParseError;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Ok(Self(s.parse::<SocketAddr>()?))
-    }
-}
-
-impl std::fmt::Display for MulticastBindAddr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Into<SocketAddr> for MulticastBindAddr {
-    fn into(self) -> SocketAddr {
-        self.0
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
-pub(crate) struct MulticastBind {
-    // Bind address for receiving multicast packets
-    pub(crate) address: MulticastBindAddr,
+pub(crate) struct Multicast {
+    // Multicast group for join
+    pub(crate) multicast: IpAddr,
 
     // Interface index to send multicast packets
     pub(crate) interface: IpAddr,
 }
 
-impl Default for MulticastBind {
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
+pub(crate) struct Udp {
+    // Bind address for receiving multicast packets
+    pub(crate) bind_address: SocketAddr,
+
+    // Remote address (multicast or over)
+    pub(crate) remote_address: SocketAddr,
+
+    // Join to group if set
+    pub(crate) join_multicast: Option<Multicast>,
+}
+
+impl Default for Udp {
     fn default() -> Self {
         Self {
-            address: "224.0.0.69:4403".try_into().unwrap(),
-            interface: "0.0.0.0".parse().unwrap(),
+            bind_address: "224.0.0.69:4403".parse().unwrap(),
+            remote_address: "224.0.0.69:4403".parse().unwrap(),
+            join_multicast: Some(Multicast {
+                multicast: "224.0.0.69".parse().unwrap(),
+                interface: "0.0.0.0".parse().unwrap(),
+            }),
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) enum SoftNodeTransport {
-    Multicast(MulticastBind),
+    UDP(Udp),
     TCP(SocketAddr),
     Serial(Serial),
 }
 
 impl Default for SoftNodeTransport {
     fn default() -> Self {
-        Self::Multicast(Default::default())
+        Self::UDP(Default::default())
     }
 }
 

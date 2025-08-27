@@ -11,8 +11,8 @@ use meshtastic_connect::{
     meshtastic::{self, ServiceEnvelope, mesh_packet},
     transport::{
         self, if_index_by_addr,
-        multicast::{Interface, Multicast},
         stream::Stream,
+        udp::{Interface, Multicast, UDP},
     },
 };
 use rand::Rng;
@@ -25,7 +25,7 @@ use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Publish, QoS};
 use std::{process, time::Duration};
 
 enum Connection {
-    Multicast(Multicast),
+    Multicast(UDP),
     Stream(Stream),
 }
 
@@ -168,16 +168,35 @@ async fn main() {
     println!();
     let soft_node = config.soft_node;
     let mut connection = match soft_node.transport {
-        config::SoftNodeTransport::Multicast(multicast_bind) => {
-            let interface = Interface {
-                address: multicast_bind.interface,
-                index: if_index_by_addr(&multicast_bind.interface).unwrap(),
-            };
-            println!(
-                "Listen multicast on {} ({:?})",
-                multicast_bind.address, interface,
-            );
-            Connection::Multicast(Multicast::new(multicast_bind.address.into(), interface))
+        config::SoftNodeTransport::UDP(udp) => {
+            if let Some(multicast) = udp.join_multicast {
+                let multicast_description = Multicast {
+                    address: multicast.multicast,
+                    interface: Interface {
+                        if_addr: multicast.interface,
+                        if_index: if_index_by_addr(&multicast.interface).unwrap(),
+                    },
+                };
+                println!(
+                    "Listen multicast on {} ({:?})",
+                    udp.bind_address, multicast_description,
+                );
+                Connection::Multicast(UDP::new(
+                    udp.bind_address.into(),
+                    udp.remote_address.into(),
+                    Some(multicast_description),
+                ))
+            } else {
+                println!(
+                    "Listen UDP on {} remote is {}",
+                    udp.bind_address, udp.remote_address
+                );
+                Connection::Multicast(UDP::new(
+                    udp.bind_address.into(),
+                    udp.remote_address.into(),
+                    None,
+                ))
+            }
         }
         config::SoftNodeTransport::TCP(stream_address) => Connection::Stream(Stream::new(
             transport::stream::StreamAddress::TCPSocket(stream_address),

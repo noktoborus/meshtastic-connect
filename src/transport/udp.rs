@@ -1,6 +1,6 @@
 use std::{
     io::ErrorKind,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
 use bytes::BytesMut;
@@ -12,84 +12,88 @@ use crate::meshtastic::{self, MeshPacket};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Interface {
+    pub if_addr: IpAddr,
+    pub if_index: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Multicast {
     pub address: IpAddr,
-    pub index: u32,
+    pub interface: Interface,
 }
 
 impl Interface {
     pub fn unspecified() -> Self {
         Self {
-            address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            index: 0,
+            if_addr: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            if_index: 0,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct Multicast {
-    pub address: SocketAddr,
-    pub interface: Interface,
+pub struct UDP {
+    pub bind_address: SocketAddr,
+    pub remote_address: SocketAddr,
+    pub join_multicast: Option<Multicast>,
     connection: Option<UdpSocket>,
 }
 
-impl Multicast {
-    pub fn new(address: SocketAddr, interface: Interface) -> Self {
+impl UDP {
+    pub fn new(
+        bind_address: SocketAddr,
+        remote_address: SocketAddr,
+        join_multicast: Option<Multicast>,
+    ) -> Self {
         Self {
-            address,
-            interface,
+            bind_address,
+            remote_address,
+            join_multicast,
             connection: None,
         }
     }
 
     pub async fn connect(&mut self) -> Result<(), std::io::Error> {
-        let bind_addr = match self.address {
-            SocketAddr::V4(_) => {
-                SocketAddr::new(IpAddr::from(Ipv4Addr::UNSPECIFIED), self.address.port())
-            }
-            SocketAddr::V6(_) => {
-                SocketAddr::new(IpAddr::from(Ipv6Addr::UNSPECIFIED), self.address.port())
-            }
-        };
-
-        let socket = UdpSocket::bind(&[bind_addr][..]).await?;
+        let socket = UdpSocket::bind(&[self.bind_address][..]).await?;
         let sock_ref = SockRef::from(&socket);
         sock_ref.set_reuse_address(true)?;
 
-        match self.address {
-            SocketAddr::V4(socket_addr_v4) => {
-                sock_ref.set_multicast_loop_v4(false)?;
-                sock_ref.set_multicast_ttl_v4(1)?;
-                match self.interface.address {
-                    IpAddr::V4(ipv4_addr) => {
-                        sock_ref.join_multicast_v4(socket_addr_v4.ip(), &ipv4_addr)?;
-                        sock_ref.set_multicast_if_v4(&ipv4_addr)?;
-                    }
-                    IpAddr::V6(ipv6_addr) => {
-                        if ipv6_addr.is_unspecified() {
-                            sock_ref
-                                .join_multicast_v4(socket_addr_v4.ip(), &Ipv4Addr::UNSPECIFIED)?;
-                        } else {
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::InvalidInput,
-                                "IPv6 Address is not suitable for IPv4 multicast",
-                            ));
+        if let Some(multicast) = self.join_multicast {
+            match multicast.address {
+                IpAddr::V4(join_ipv4_addr) => {
+                    sock_ref.set_multicast_loop_v4(false)?;
+                    sock_ref.set_multicast_ttl_v4(1)?;
+
+                    match multicast.interface.if_addr {
+                        IpAddr::V4(if_ipv4_addr) => {
+                            sock_ref.join_multicast_v4(&join_ipv4_addr, &if_ipv4_addr)?;
+                            sock_ref.set_multicast_if_v4(&if_ipv4_addr)?;
+                        }
+                        IpAddr::V6(if_ipv6_addr) => {
+                            if if_ipv6_addr.is_unspecified() {
+                                sock_ref
+                                    .join_multicast_v4(&join_ipv4_addr, &Ipv4Addr::UNSPECIFIED)?;
+                            } else {
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidInput,
+                                    "IPv6 Address is not suitable for IPv4 multicast",
+                                ));
+                            }
                         }
                     }
                 }
-            }
-            SocketAddr::V6(socket_addr_v6) => {
-                sock_ref.set_multicast_loop_v6(false)?;
-                sock_ref.set_multicast_hops_v6(1)?;
+                IpAddr::V6(ipv6_addr) => {
+                    sock_ref.set_multicast_loop_v6(false)?;
+                    sock_ref.set_multicast_hops_v6(1)?;
 
-                sock_ref.join_multicast_v6(socket_addr_v6.ip(), self.interface.index)?;
-                sock_ref.set_multicast_if_v6(self.interface.index)?;
+                    sock_ref.join_multicast_v6(&ipv6_addr, multicast.interface.if_index)?;
+                    sock_ref.set_multicast_if_v6(multicast.interface.if_index)?;
+                }
             }
-        };
+        }
 
         drop(sock_ref);
-
         self.connection = Some(socket);
-
         Ok(())
     }
 
@@ -123,7 +127,7 @@ impl Multicast {
                 mesh_packet
                     .encode(&mut buf)
                     .map_err(|e| std::io::Error::new(ErrorKind::InvalidInput, e.to_string()))?;
-                socket.send_to(&buf, self.address).await?;
+                socket.send_to(&buf, self.remote_address).await?;
                 Ok(())
             }
         }

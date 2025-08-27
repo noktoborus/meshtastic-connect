@@ -4,10 +4,10 @@ use clap::Parser;
 use meshtastic_connect::meshtastic_print::{
     print_from_radio_payload, print_mesh_packet, print_service_envelope,
 };
-use meshtastic_connect::transport::multicast::Interface;
+use meshtastic_connect::transport::udp::{Interface, Multicast};
 use meshtastic_connect::transport::{
-    multicast::Multicast,
     stream::{self, Serial, Stream, StreamAddress},
+    udp::UDP,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_yaml_ng::from_reader;
@@ -283,7 +283,14 @@ async fn main() {
         }
         Mode::Multicast(multicast) => {
             println!("Listen multicast on {}", multicast.listen_address);
-            let mut connection = Multicast::new(multicast.listen_address, Interface::unspecified());
+            let mut connection = UDP::new(
+                multicast.listen_address,
+                multicast.listen_address,
+                Some(Multicast {
+                    address: multicast.listen_address.ip(),
+                    interface: Interface::unspecified(),
+                }),
+            );
 
             connection.connect().await.unwrap();
             loop {
