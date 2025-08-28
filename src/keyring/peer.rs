@@ -1,7 +1,5 @@
 use super::{key::K256, node_id::NodeId};
-
 use std::fmt;
-use x25519_dalek::{PublicKey, StaticSecret};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Peer {
@@ -12,11 +10,9 @@ pub struct Peer {
 
 impl Peer {
     pub fn new(node_id: NodeId, secret_key: K256) -> Result<Self, String> {
-        let secret = StaticSecret::from(*secret_key.as_bytes());
-
         Ok(Self {
             node_id,
-            public_key: K256(PublicKey::from(&secret).to_bytes()),
+            public_key: secret_key.public_key(),
             private_key: Some(secret_key),
         })
     }

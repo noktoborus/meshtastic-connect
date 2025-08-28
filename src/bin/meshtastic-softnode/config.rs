@@ -18,6 +18,8 @@ use std::{
     time::Duration,
 };
 
+use crate::publish;
+
 #[derive(clap::Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub(crate) struct Args {
@@ -98,8 +100,8 @@ impl<'de> Deserialize<'de> for Hops {
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct SoftNodeChannel {
     pub(crate) name: String,
-    pub(crate) node_info: Option<Duration>,
     pub(crate) hop_start: Hops,
+    pub(crate) publish: Vec<publish::Publish>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
@@ -161,21 +163,37 @@ pub(crate) struct SoftNodeConfig {
     #[serde(default)]
     pub(crate) private_key: K256,
     #[serde(default)]
+    pub(crate) public_key: K256,
+    #[serde(default)]
     pub(crate) channels: Vec<SoftNodeChannel>,
 }
 
 impl Default for SoftNodeConfig {
     fn default() -> Self {
+        let private_key = K256::default();
+        let public_key = private_key.public_key();
+
         Self {
             transport: Default::default(),
             name: "SoftNode".to_string(),
             short_name: "SFTN".to_string(),
             node_id: NodeId::default(),
-            private_key: K256::default(),
+            private_key,
+            public_key,
             channels: vec![SoftNodeChannel {
                 name: "LongFast".into(),
                 hop_start: Hops(7),
-                node_info: Some(Duration::from_secs(900)),
+                publish: vec![
+                    publish::Publish::NodeInfo(publish::PublishNodeInfo {
+                        interval: Duration::from_secs(900).into(),
+                    }),
+                    publish::Publish::Position(publish::PublishPosition {
+                        interval: Duration::from_secs(900).into(),
+                        lat: 0.0,
+                        lon: 0.0,
+                        alt: 0,
+                    }),
+                ],
             }],
         }
     }
@@ -255,6 +273,13 @@ pub(crate) fn load_config(args: &Args) -> Option<Config> {
     let soft_node = match config_read::<SoftNodeConfig>(&args.main_file) {
         Ok(soft_node_or_not) => {
             if let Some(soft_node) = soft_node_or_not {
+                let public_key = soft_node.private_key.public_key();
+                if soft_node.public_key != public_key {
+                    println!(
+                        "Public key does not match private key. Should be {}",
+                        public_key
+                    );
+                }
                 Some(soft_node)
             } else {
                 println!("Connection config not found, write default");

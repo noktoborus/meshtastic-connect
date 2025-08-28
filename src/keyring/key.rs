@@ -3,6 +3,7 @@ use rand::Rng;
 use serde::de::{self, Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 use std::fmt;
+use x25519_dalek::{PublicKey, StaticSecret};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct K128(pub [u8; 16]);
@@ -35,6 +36,12 @@ impl Default for K256 {
 impl K256 {
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+
+    pub fn public_key(&self) -> K256 {
+        let secret = StaticSecret::from(*self.as_bytes());
+
+        K256(PublicKey::from(&secret).to_bytes())
     }
 }
 
