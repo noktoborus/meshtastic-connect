@@ -259,7 +259,6 @@ async fn main() {
     println!("=== ===");
 
     let mut keyring = Keyring::new();
-    let mut filter_by_nodeid: Vec<NodeId> = Default::default();
 
     for channel in config.keys.channels {
         keyring
@@ -272,9 +271,6 @@ async fn main() {
             keyring.add_peer(peer.node_id, skey).unwrap();
         } else if let Some(pkey) = peer.public_key {
             keyring.add_remote_peer(peer.node_id, pkey).unwrap();
-        }
-        if peer.highlight {
-            filter_by_nodeid.push(peer.node_id);
         }
     }
 

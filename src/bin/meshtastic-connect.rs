@@ -103,7 +103,6 @@ struct Channel {
 struct Peer {
     name: String,
     node_id: NodeId,
-    highlight: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     public_key: Option<K256>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -211,9 +210,6 @@ async fn main() {
             keyring.add_peer(peer.node_id, skey).unwrap();
         } else if let Some(pkey) = peer.public_key {
             keyring.add_remote_peer(peer.node_id, pkey).unwrap();
-        }
-        if peer.highlight {
-            filter_by_nodeid.push(peer.node_id);
         }
     }
 

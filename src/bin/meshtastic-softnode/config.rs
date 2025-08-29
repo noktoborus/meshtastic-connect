@@ -61,7 +61,6 @@ pub(crate) struct Channel {
 pub(crate) struct Peer {
     pub(crate) name: String,
     pub(crate) node_id: NodeId,
-    pub(crate) highlight: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) public_key: Option<K256>,
     #[serde(skip_serializing_if = "Option::is_none")]
