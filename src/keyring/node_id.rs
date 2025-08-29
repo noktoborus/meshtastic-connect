@@ -1,7 +1,7 @@
 use rand::Rng;
 use serde::de::{self, Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
-use std::fmt;
+use std::fmt::{self, LowerHex, UpperHex};
 use std::num;
 use std::str;
 
@@ -19,6 +19,18 @@ impl Default for NodeId {
         let mut rng = rand::rng();
 
         NodeId(rng.random())
+    }
+}
+
+impl LowerHex for NodeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:08x}", self.0)
+    }
+}
+
+impl UpperHex for NodeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:08X}", self.0)
     }
 }
 

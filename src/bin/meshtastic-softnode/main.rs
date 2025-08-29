@@ -1,9 +1,14 @@
 mod config;
 mod publish;
+mod sqlite;
 
 use clap::Parser;
 use meshtastic_connect::{
-    keyring::{Keyring, cryptor::Encrypt, node_id::NodeId},
+    keyring::{
+        Keyring,
+        cryptor::{Decrypt, Encrypt},
+        node_id::NodeId,
+    },
     meshtastic::{self, ServiceEnvelope, mesh_packet},
     transport::{
         self, if_index_by_addr,
@@ -177,6 +182,7 @@ impl Connection {
 }
 
 async fn handle_timer_event(
+    sqlite: &sqlite::SQLite,
     schedule: &mut Schedule,
     soft_node: &SoftNodeConfig,
     keyring: &Keyring,
@@ -190,22 +196,20 @@ async fn handle_timer_event(
             .cryptor_for_channel_name(soft_node.node_id, &channel.name)
             .unwrap();
 
-        println!("Publishing {:?}", publish_descriptor);
+        println!(
+            "Publishing {:?} to channel {}",
+            publish_descriptor, channel.name
+        );
         let (port_num, data_payload) = publish_descriptor.pack_to_data(&soft_node);
         let packet_id: u32 = rand::rng().random();
         let dest_node: u32 = 0xffffffff;
-        let data = cryptor
-            .encrypt(
-                packet_id,
-                meshtastic::Data {
-                    portnum: port_num.into(),
-                    payload: data_payload,
-                    ..Default::default()
-                }
-                .encode_to_vec(),
-            )
-            .await
-            .unwrap();
+        let data = meshtastic::Data {
+            portnum: port_num.into(),
+            payload: data_payload,
+            ..Default::default()
+        }
+        .encode_to_vec();
+        let encrypted_data = cryptor.encrypt(packet_id, data.clone()).await.unwrap();
 
         let mesh_packet = meshtastic::MeshPacket {
             from: soft_node.node_id.into(),
@@ -216,11 +220,19 @@ async fn handle_timer_event(
             priority: meshtastic::mesh_packet::Priority::Default.into(),
             hop_start: channel.hop_start.into(),
             public_key: vec![],
-            payload_variant: Some(mesh_packet::PayloadVariant::Encrypted(data)),
+            payload_variant: Some(mesh_packet::PayloadVariant::Encrypted(encrypted_data)),
             ..Default::default()
         };
 
         println!("send mesh: {:?}", mesh_packet);
+        sqlite
+            .insert_packet(
+                &mesh_packet,
+                Some(channel.name.clone()),
+                Some(port_num),
+                Some(&data),
+            )
+            .unwrap();
         connection.send_mesh(mesh_packet).await.unwrap();
 
         let interval = publish_descriptor.interval();
@@ -230,12 +242,83 @@ async fn handle_timer_event(
     }
 }
 
-async fn handle_network_event(result: Result<RecvData, Box<dyn std::error::Error>>) {
+async fn handle_network_event(
+    sqlite: &sqlite::SQLite,
+    keyring: &Keyring,
+    result: Result<RecvData, Box<dyn std::error::Error>>,
+) {
     match result {
         Ok(recv_data) => match recv_data {
             RecvData::MeshPacket(mesh_packet) => {
                 println!("received mesh packet: {:?}", mesh_packet);
                 println!();
+                if let Some(ref payload_variant) = mesh_packet.payload_variant {
+                    match payload_variant {
+                        mesh_packet::PayloadVariant::Decoded(data) => {
+                            sqlite
+                                .insert_packet(
+                                    &mesh_packet,
+                                    Some("".into()),
+                                    Some(data.portnum()),
+                                    Some(&data.encode_to_vec()),
+                                )
+                                .unwrap();
+                        }
+                        mesh_packet::PayloadVariant::Encrypted(encrypted_data) => {
+                            if !match keyring.cryptor_for(
+                                NodeId::from(mesh_packet.from),
+                                NodeId::from(mesh_packet.to),
+                                mesh_packet.channel,
+                            ) {
+                                Some(cryptor) => {
+                                    match cryptor
+                                        .decrypt(mesh_packet.id, encrypted_data.clone())
+                                        .await
+                                    {
+                                        Ok(decrypted_data) => {
+                                            match meshtastic::Data::decode(
+                                                decrypted_data.as_slice(),
+                                            ) {
+                                                Ok(data) => {
+                                                    sqlite
+                                                        .insert_packet(
+                                                            &mesh_packet,
+                                                            Some("".into()),
+                                                            Some(data.portnum()),
+                                                            Some(&data.encode_to_vec()),
+                                                        )
+                                                        .unwrap();
+                                                    true
+                                                }
+                                                Err(err) => {
+                                                    println!("Failed to construct data: {}", err);
+                                                    false
+                                                }
+                                            }
+                                        }
+                                        Err(err) => {
+                                            println!("Failed to decrypt data: {}", err);
+                                            false
+                                        }
+                                    }
+                                }
+                                None => {
+                                    println!("No cryptor found for packet: {:?}", mesh_packet);
+                                    false
+                                }
+                            } {
+                                sqlite
+                                    .insert_packet(&mesh_packet, None, None, Some(encrypted_data))
+                                    .unwrap();
+                            };
+                        }
+                    }
+                } else {
+                    println!("No data received: {:?}", mesh_packet);
+                    sqlite
+                        .insert_packet(&mesh_packet, None, None, None)
+                        .unwrap();
+                }
             }
             RecvData::Unstructured(items) => tokio::io::stderr().write_all(&items).await.unwrap(),
         },
@@ -321,6 +404,8 @@ async fn main() {
     let soft_node = config.soft_node;
     let mut connection = build_connection(&soft_node);
     let mut schedule = Schedule::new(&soft_node.channels);
+    let sqlite_name = format!("journal-{:x}.sqlite", soft_node.node_id);
+    let sqlite = sqlite::SQLite::new(sqlite_name.as_str()).unwrap();
 
     connection.connect().await.unwrap();
 
@@ -331,10 +416,10 @@ async fn main() {
 
         tokio::select! {
             _ = sleep_until(next_wakeup) => {
-                handle_timer_event(&mut schedule, &soft_node, &keyring, &mut connection).await;
+                handle_timer_event(&sqlite, &mut schedule, &soft_node, &keyring, &mut connection).await;
             },
             result = connection.recv_mesh() => {
-                handle_network_event(result).await;
+                handle_network_event(&sqlite, &keyring, result).await;
             }
         }
     }

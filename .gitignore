@@ -2,6 +2,7 @@
 /connect.yaml
 /softnode.yaml
 /keys.yaml
+/journal-*.sqlite
 # Added by cargo
 #
 # already existing elements were commented out

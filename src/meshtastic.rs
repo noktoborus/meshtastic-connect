@@ -118,17 +118,7 @@ pub mod channel {
     /// cross band routing as needed.
     /// If a device has only a single radio (the common case) only one channel can be PRIMARY at a time
     /// (but any number of SECONDARY channels can't be sent received on that common frequency)
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Role {
         ///
@@ -514,7 +504,10 @@ impl Language {
 pub struct Config {
     ///
     /// Payload Variant
-    #[prost(oneof = "config::PayloadVariant", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10")]
+    #[prost(
+        oneof = "config::PayloadVariant",
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
+    )]
     pub payload_variant: ::core::option::Option<config::PayloadVariant>,
 }
 /// Nested message and enum types in `Config`.
@@ -586,15 +579,7 @@ pub mod config {
         ///
         /// Defines the device's role on the Mesh network
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum Role {
@@ -705,15 +690,7 @@ pub mod config {
         ///
         /// Defines the device's behavior for how messages are rebroadcast
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum RebroadcastMode {
@@ -772,15 +749,7 @@ pub mod config {
         ///
         /// Defines buzzer behavior for audio feedback
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum BuzzerMode {
@@ -909,15 +878,7 @@ pub mod config {
         /// NOTE: the more fields are included, the larger the message will be -
         ///    leading to longer airtime and a higher risk of packet loss
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum PositionFlags {
@@ -998,15 +959,7 @@ pub mod config {
             }
         }
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum GpsMode {
@@ -1165,15 +1118,7 @@ pub mod config {
             pub dns: u32,
         }
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum AddressMode {
@@ -1207,15 +1152,7 @@ pub mod config {
         ///
         /// Available flags auxiliary network protocols
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum ProtocolFlags {
@@ -1309,15 +1246,7 @@ pub mod config {
         ///
         /// How the GPS coordinates are displayed on the OLED screen.
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum GpsCoordinateFormat {
@@ -1378,15 +1307,7 @@ pub mod config {
         ///
         /// Unit display preference
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum DisplayUnits {
@@ -1420,15 +1341,7 @@ pub mod config {
         ///
         /// Override OLED outo detect with this if it fails.
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum OledType {
@@ -1475,15 +1388,7 @@ pub mod config {
             }
         }
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum DisplayMode {
@@ -1525,15 +1430,7 @@ pub mod config {
             }
         }
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum CompassOrientation {
@@ -1706,15 +1603,7 @@ pub mod config {
     /// Nested message and enum types in `LoRaConfig`.
     pub mod lo_ra_config {
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum RegionCode {
@@ -1864,15 +1753,7 @@ pub mod config {
         /// Standard predefined channel settings
         /// Note: these mappings must match ModemPreset Choice in the device code.
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum ModemPreset {
@@ -1960,15 +1841,7 @@ pub mod config {
     /// Nested message and enum types in `BluetoothConfig`.
     pub mod bluetooth_config {
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum PairingMode {
@@ -2340,15 +2213,7 @@ pub mod module_config {
     /// Nested message and enum types in `DetectionSensorConfig`.
     pub mod detection_sensor_config {
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum TriggerType {
@@ -2434,15 +2299,7 @@ pub mod module_config {
         ///
         /// Baudrate for codec2 voice
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum AudioBaud {
@@ -2554,15 +2411,7 @@ pub mod module_config {
         ///
         /// TODO: REPLACE
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum SerialBaud {
@@ -2634,15 +2483,7 @@ pub mod module_config {
         ///
         /// TODO: REPLACE
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum SerialMode {
@@ -2933,15 +2774,7 @@ pub mod module_config {
         ///
         /// TODO: REPLACE
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Eq,
-            Hash,
-            PartialOrd,
-            Ord,
-            ::prost::Enumeration
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration,
         )]
         #[repr(i32)]
         pub enum InputEventChar {
@@ -4061,17 +3894,7 @@ pub struct XModem {
 }
 /// Nested message and enum types in `XModem`.
 pub mod x_modem {
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Control {
         Nul = 0,
@@ -4236,17 +4059,7 @@ pub struct Position {
 pub mod position {
     ///
     /// How the location was acquired: manual, onboard GPS, external (EUD) GPS
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum LocSource {
         ///
@@ -4289,17 +4102,7 @@ pub mod position {
     ///
     /// How the altitude was acquired: manual, GPS int/ext, etc
     /// Default: same as location_source if present
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum AltSource {
         ///
@@ -4451,17 +4254,7 @@ pub mod routing {
     ///
     /// A failure in delivering a message (usually used for routing control messages, but might be provided in addition to ack.fail_id to provide
     /// details on the type of failure).
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Error {
         ///
@@ -4704,9 +4497,7 @@ pub struct MqttClientProxyMessage {
     ///
     /// The actual service envelope payload or text for mqtt pub / sub
     #[prost(oneof = "mqtt_client_proxy_message::PayloadVariant", tags = "2, 3")]
-    pub payload_variant: ::core::option::Option<
-        mqtt_client_proxy_message::PayloadVariant,
-    >,
+    pub payload_variant: ::core::option::Option<mqtt_client_proxy_message::PayloadVariant>,
 }
 /// Nested message and enum types in `MqttClientProxyMessage`.
 pub mod mqtt_client_proxy_message {
@@ -4864,17 +4655,7 @@ pub mod mesh_packet {
     /// So I bit the bullet and implemented a new (internal - not sent over the air)
     /// field in MeshPacket called 'priority'.
     /// And the transmission queue in the router object is now a priority queue.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Priority {
         ///
@@ -4950,17 +4731,7 @@ pub mod mesh_packet {
     }
     ///
     /// Identify if this is a delayed packet
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Delayed {
         ///
@@ -5140,17 +4911,7 @@ pub struct LogRecord {
 pub mod log_record {
     ///
     /// Log levels, chosen to match python logging conventions.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Level {
         ///
@@ -5344,7 +5105,10 @@ pub struct ClientNotification {
     /// The message body of the notification
     #[prost(string, tag = "4")]
     pub message: ::prost::alloc::string::String,
-    #[prost(oneof = "client_notification::PayloadVariant", tags = "11, 12, 13, 14, 15")]
+    #[prost(
+        oneof = "client_notification::PayloadVariant",
+        tags = "11, 12, 13, 14, 15"
+    )]
     pub payload_variant: ::core::option::Option<client_notification::PayloadVariant>,
 }
 /// Nested message and enum types in `ClientNotification`.
@@ -5620,9 +5384,7 @@ pub struct ChunkedPayloadResponse {
     #[prost(uint32, tag = "1")]
     pub payload_id: u32,
     #[prost(oneof = "chunked_payload_response::PayloadVariant", tags = "2, 3, 4")]
-    pub payload_variant: ::core::option::Option<
-        chunked_payload_response::PayloadVariant,
-    >,
+    pub payload_variant: ::core::option::Option<chunked_payload_response::PayloadVariant>,
 }
 /// Nested message and enum types in `ChunkedPayloadResponse`.
 pub mod chunked_payload_response {
@@ -6522,17 +6284,7 @@ pub mod admin_message {
     }
     ///
     /// TODO: REPLACE
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum ConfigType {
         ///
@@ -6604,17 +6356,7 @@ pub mod admin_message {
     }
     ///
     /// TODO: REPLACE
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum ModuleConfigType {
         ///
@@ -6699,17 +6441,7 @@ pub mod admin_message {
             }
         }
     }
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum BackupLocation {
         ///
@@ -7042,17 +6774,7 @@ pub struct KeyVerificationAdmin {
 pub mod key_verification_admin {
     ///
     /// Three stages of this request.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum MessageType {
         ///
@@ -7468,9 +7190,7 @@ pub struct LocalModuleConfig {
     ///
     /// The part of the config that is specific to the ExternalNotification module
     #[prost(message, optional, tag = "3")]
-    pub external_notification: ::core::option::Option<
-        module_config::ExternalNotificationConfig,
-    >,
+    pub external_notification: ::core::option::Option<module_config::ExternalNotificationConfig>,
     ///
     /// The part of the config that is specific to the Store & Forward module
     #[prost(message, optional, tag = "4")]
@@ -7760,17 +7480,7 @@ pub struct PowerMon {}
 pub mod power_mon {
     /// Any significant power changing event in meshtastic should be tagged with a powermon state transition.
     /// If you are making new meshtastic features feel free to add new entries at the end of this definition.
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum State {
         None = 0,
@@ -7859,17 +7569,7 @@ pub mod power_stress_message {
     /// What operation would we like the UUT to perform.
     /// note: senders should probably set want_response in their request packets, so that they can know when the state
     /// machine has started processing their request
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Opcode {
         ///
@@ -8001,17 +7701,7 @@ pub struct HardwareMessage {
 pub mod hardware_message {
     ///
     /// TODO: REPLACE
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum Type {
         ///
@@ -8163,17 +7853,7 @@ pub mod store_and_forward {
     ///
     /// 001 - 063 = From Router
     /// 064 - 127 = From Client
-    #[derive(
-        Clone,
-        Copy,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-        PartialOrd,
-        Ord,
-        ::prost::Enumeration
-    )]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum RequestResponse {
         ///
