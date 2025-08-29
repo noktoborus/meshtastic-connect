@@ -56,6 +56,7 @@ impl Publishable for PublishPosition {
             altitude_hae: Some(self.alt),
             location_source: meshtastic::position::LocSource::LocManual.into(),
             altitude_source: meshtastic::position::AltSource::AltManual.into(),
+            timestamp: chrono::Utc::now().timestamp() as u32,
             next_update: self.interval.as_secs() as u32,
             ..Default::default()
         };
