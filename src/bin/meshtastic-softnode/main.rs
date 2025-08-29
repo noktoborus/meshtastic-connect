@@ -320,10 +320,9 @@ async fn main() {
     println!();
     let soft_node = config.soft_node;
     let mut connection = build_connection(&soft_node);
+    let mut schedule = Schedule::new(&soft_node.channels);
 
     connection.connect().await.unwrap();
-
-    let mut schedule = Schedule::new(&soft_node.channels);
 
     loop {
         let next_wakeup = schedule.next_wakeup().unwrap_or_else(|| {
