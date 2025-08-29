@@ -246,37 +246,8 @@ async fn handle_network_event(result: Result<RecvData, Box<dyn std::error::Error
     }
 }
 
-#[tokio::main]
-async fn main() {
-    let args = Args::parse();
-    let config = load_config(&args).unwrap_or_else(|| {
-        println!("Config file not loaded: try type `--help` to get help");
-        process::exit(1)
-    });
-
-    println!("=== loaded config ===");
-    println!("{}", serde_yaml_ng::to_string(&config).unwrap());
-    println!("=== ===");
-
-    let mut keyring = Keyring::new();
-
-    for channel in config.keys.channels {
-        keyring
-            .add_channel(channel.name.as_str(), channel.key)
-            .unwrap();
-    }
-
-    for peer in config.keys.peers {
-        if let Some(skey) = peer.private_key {
-            keyring.add_peer(peer.node_id, skey).unwrap();
-        } else if let Some(pkey) = peer.public_key {
-            keyring.add_remote_peer(peer.node_id, pkey).unwrap();
-        }
-    }
-
-    println!();
-    let soft_node = config.soft_node;
-    let mut connection = match soft_node.transport {
+fn build_connection(soft_node: &SoftNodeConfig) -> Connection {
+    match soft_node.transport {
         config::SoftNodeTransport::UDP(udp) => {
             if let Some(multicast) = udp.join_multicast {
                 let multicast_description = Multicast {
@@ -315,7 +286,40 @@ async fn main() {
             transport::stream::StreamAddress::Serial(serial.clone()),
             Duration::from_secs(10),
         )),
-    };
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let args = Args::parse();
+    let config = load_config(&args).unwrap_or_else(|| {
+        println!("Config file not loaded: try type `--help` to get help");
+        process::exit(1)
+    });
+
+    println!("=== loaded config ===");
+    println!("{}", serde_yaml_ng::to_string(&config).unwrap());
+    println!("=== ===");
+
+    let mut keyring = Keyring::new();
+
+    for channel in config.keys.channels {
+        keyring
+            .add_channel(channel.name.as_str(), channel.key)
+            .unwrap();
+    }
+
+    for peer in config.keys.peers {
+        if let Some(skey) = peer.private_key {
+            keyring.add_peer(peer.node_id, skey).unwrap();
+        } else if let Some(pkey) = peer.public_key {
+            keyring.add_remote_peer(peer.node_id, pkey).unwrap();
+        }
+    }
+
+    println!();
+    let soft_node = config.soft_node;
+    let mut connection = build_connection(&soft_node);
 
     connection.connect().await.unwrap();
 
