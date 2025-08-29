@@ -11,14 +11,16 @@ use meshtastic_connect::{
         udp::{Interface, Multicast, UDP},
     },
 };
+use prost::Message;
 use publish::Publishable;
 use rand::Rng;
-use tokio::io::AsyncWriteExt;
+use std::{collections::VecDeque, process, time::Duration};
+use tokio::{
+    io::AsyncWriteExt,
+    time::{Instant, sleep_until},
+};
 
-use crate::config::Args;
-use crate::config::load_config;
-use prost::Message;
-use std::{any::type_name_of_val, process, time::Duration};
+use crate::config::{Args, SoftNodeChannel, SoftNodeConfig, load_config};
 
 enum Connection {
     Multicast(UDP),
@@ -28,6 +30,51 @@ enum Connection {
 enum RecvData {
     MeshPacket(meshtastic::MeshPacket),
     Unstructured(Vec<u8>),
+}
+
+struct Schedule {
+    items: VecDeque<(Instant, (usize, usize))>,
+}
+
+impl Schedule {
+    fn new(channels: &[SoftNodeChannel]) -> Self {
+        let mut items = Vec::new();
+        let now = Instant::now();
+
+        for (channel_idx, channel) in channels.iter().enumerate() {
+            for (publish_idx, _) in channel.publish.iter().enumerate() {
+                items.push((now, (channel_idx, publish_idx)));
+            }
+        }
+
+        items.sort_by_key(|(inst, _)| *inst);
+
+        Self {
+            items: VecDeque::from(items),
+        }
+    }
+
+    fn add(&mut self, event_time: Instant, event_data: (usize, usize)) {
+        let pos = self
+            .items
+            .binary_search_by_key(&event_time, |(t, _)| *t)
+            .unwrap_or_else(|e| e);
+        self.items.insert(pos, (event_time, event_data));
+    }
+
+    fn next_wakeup(&self) -> Option<Instant> {
+        self.items.front().map(|(inst, _)| *inst)
+    }
+
+    fn pop_if_completed(&mut self) -> Option<(Instant, (usize, usize))> {
+        let now = Instant::now();
+        if let Some((event_time, _)) = self.items.front() {
+            if *event_time <= now {
+                return self.items.pop_front();
+            }
+        }
+        None
+    }
 }
 
 impl Connection {
@@ -84,7 +131,7 @@ impl Connection {
                 transport::stream::StreamData::Packet(from_radio) => {
                     if let Some(payload_variant) = from_radio.payload_variant {
                         match payload_variant {
-                            meshtastic::from_radio::PayloadVariant::Packet(mesh_packet) => {
+                            meshtastic::from_radio::PayloadVariant::Packet(_mesh_packet) => {
                                 // Ok(RecvData::MeshPacket(mesh_packet))
                                 Ok(RecvData::Unstructured(
                                     format!("Receive transport's mesh packet").into(),
@@ -125,6 +172,76 @@ impl Connection {
                     Ok(RecvData::Unstructured(bytes_mut.to_vec()))
                 }
             },
+        }
+    }
+}
+
+async fn handle_timer_event(
+    schedule: &mut Schedule,
+    soft_node: &SoftNodeConfig,
+    keyring: &Keyring,
+    connection: &mut Connection,
+) {
+    while let Some((_, (channel_idx, publish_idx))) = schedule.pop_if_completed() {
+        let channel = &soft_node.channels[channel_idx];
+        let publish_descriptor = &channel.publish[publish_idx];
+
+        let (cryptor, channel_hash) = keyring
+            .cryptor_for_channel_name(soft_node.node_id, &channel.name)
+            .unwrap();
+
+        println!("Publishing {:?}", publish_descriptor);
+        let (port_num, data_payload) = publish_descriptor.pack_to_data(&soft_node);
+        let packet_id: u32 = rand::rng().random();
+        let dest_node: u32 = 0xffffffff;
+        let data = cryptor
+            .encrypt(
+                packet_id,
+                meshtastic::Data {
+                    portnum: port_num.into(),
+                    payload: data_payload,
+                    ..Default::default()
+                }
+                .encode_to_vec(),
+            )
+            .await
+            .unwrap();
+
+        let mesh_packet = meshtastic::MeshPacket {
+            from: soft_node.node_id.into(),
+            to: dest_node.into(),
+            channel: channel_hash,
+            id: packet_id,
+            hop_limit: channel.hop_start.into(),
+            priority: meshtastic::mesh_packet::Priority::Default.into(),
+            hop_start: channel.hop_start.into(),
+            public_key: vec![],
+            payload_variant: Some(mesh_packet::PayloadVariant::Encrypted(data)),
+            ..Default::default()
+        };
+
+        println!("send mesh: {:?}", mesh_packet);
+        connection.send_mesh(mesh_packet).await.unwrap();
+
+        let interval = publish_descriptor.interval();
+        if !interval.is_zero() {
+            schedule.add(Instant::now() + interval, (channel_idx, publish_idx));
+        }
+    }
+}
+
+async fn handle_network_event(result: Result<RecvData, Box<dyn std::error::Error>>) {
+    match result {
+        Ok(recv_data) => match recv_data {
+            RecvData::MeshPacket(mesh_packet) => {
+                println!("received mesh packet: {:?}", mesh_packet);
+                println!();
+            }
+            RecvData::Unstructured(items) => tokio::io::stderr().write_all(&items).await.unwrap(),
+        },
+        Err(err) => {
+            println!("handle error: {}", err);
+            println!();
         }
     }
 }
@@ -206,64 +323,20 @@ async fn main() {
 
     connection.connect().await.unwrap();
 
-    for channel in &soft_node.channels {
-        let (cryptor, channel_hash) = keyring
-            .cryptor_for_channel_name(soft_node.node_id, &channel.name)
-            .unwrap();
-
-        for publish_descriptor in &channel.publish {
-            println!("Publishing {}", type_name_of_val(publish_descriptor));
-            let (port_num, data_payload) = publish_descriptor.pack_to_data(&soft_node);
-            let packet_id = rand::rng().random();
-            let dest_node: u32 = 0xffffffff;
-            let data = cryptor
-                .encrypt(
-                    packet_id,
-                    meshtastic::Data {
-                        portnum: port_num.into(),
-                        payload: data_payload,
-                        ..Default::default()
-                    }
-                    .encode_to_vec(),
-                )
-                .await
-                .unwrap();
-
-            let mesh_packet = meshtastic::MeshPacket {
-                from: soft_node.node_id.into(),
-                to: dest_node.into(),
-                channel: channel_hash,
-                id: packet_id,
-                hop_limit: channel.hop_start.into(),
-                priority: meshtastic::mesh_packet::Priority::Default.into(),
-                hop_start: channel.hop_start.into(),
-                public_key: vec![],
-                payload_variant: Some(mesh_packet::PayloadVariant::Encrypted(data)),
-                ..Default::default()
-            };
-
-            println!("send mesh: {:?}", mesh_packet);
-            connection.send_mesh(mesh_packet).await.unwrap();
-        }
-    }
+    let mut schedule = Schedule::new(&soft_node.channels);
 
     loop {
-        match connection.recv_mesh().await {
-            Ok(recv_data) => match recv_data {
-                RecvData::MeshPacket(mesh_packet) => {
-                    println!("received mesh packet: {:?}", mesh_packet);
-                    println!();
-                }
-                RecvData::Unstructured(items) => {
-                    tokio::io::stderr().write_all(&items).await.unwrap()
-                }
+        let next_wakeup = schedule.next_wakeup().unwrap_or_else(|| {
+            Instant::now() + Duration::from_secs(60 * 60 * 24) // 1 day
+        });
+
+        tokio::select! {
+            _ = sleep_until(next_wakeup) => {
+                handle_timer_event(&mut schedule, &soft_node, &keyring, &mut connection).await;
             },
-            Err(err) => {
-                println!("handle error: {}", err);
-                println!();
+            result = connection.recv_mesh() => {
+                handle_network_event(result).await;
             }
         }
-
-        // print_mesh_packet(mesh_packet, &keyring, &filter_by_nodeid).await;
     }
 }
