@@ -1,5 +1,4 @@
 use meshtastic_connect::{keyring::node_id::NodeId, meshtastic};
-use prost::Message;
 use rusqlite::{Connection, params};
 
 pub(crate) struct SQLite {
