@@ -10,7 +10,7 @@ impl SQLite {
         let conn = Connection::open(db_path)?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS mesh_packets (
-                log_time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                log_time TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
                 id INTEGER NOT NULL,
                 'from' TEXT NOT NULL,
                 'to' TEXT NOT NULL,
