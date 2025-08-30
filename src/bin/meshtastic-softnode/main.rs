@@ -301,7 +301,7 @@ async fn handle_network_event(
                             sqlite
                                 .insert_packet(
                                     &mesh_packet,
-                                    Some("".into()),
+                                    None,
                                     Some(data.portnum()),
                                     Some(&data.encode_to_vec()),
                                 )
@@ -326,7 +326,7 @@ async fn handle_network_event(
                                                     sqlite
                                                         .insert_packet(
                                                             &mesh_packet,
-                                                            Some("".into()),
+                                                            Some(cryptor.to_string()),
                                                             Some(data.portnum()),
                                                             Some(&data.encode_to_vec()),
                                                         )
