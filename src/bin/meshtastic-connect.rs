@@ -19,6 +19,7 @@ use keyring::{
     node_id::NodeId,
 };
 use rumqttc::{AsyncClient, MqttOptions, QoS};
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::Duration;
 use std::{fs::File, io::BufReader, net::SocketAddr};
 use tokio::io::AsyncWriteExt;
@@ -280,7 +281,10 @@ async fn main() {
         Mode::Multicast(multicast) => {
             println!("Listen multicast on {}", multicast.listen_address);
             let mut connection = UDP::new(
-                multicast.listen_address,
+                SocketAddr::V4(SocketAddrV4::new(
+                    Ipv4Addr::UNSPECIFIED,
+                    multicast.listen_address.port(),
+                )),
                 multicast.listen_address,
                 Some(Multicast {
                     address: multicast.listen_address.ip(),
