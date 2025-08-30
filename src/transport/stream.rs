@@ -55,7 +55,9 @@ use crate::meshtastic;
 struct RadioCodec;
 
 pub enum StreamData {
-    Packet(meshtastic::FromRadio),
+    // FromRadio structured data
+    FromRadio(meshtastic::FromRadio),
+    // Raw, journal or other unrecognized data
     Unstructured(BytesMut),
 }
 
@@ -121,7 +123,7 @@ impl Decoder for RadioCodec {
         if src.len() >= frame_len {
             let pbuf = src.split_to(frame_len);
             match meshtastic::FromRadio::decode(&pbuf[HEADER_LEN..]) {
-                Ok(from_radio) => Ok(Some(StreamData::Packet(from_radio))),
+                Ok(from_radio) => Ok(Some(StreamData::FromRadio(from_radio))),
                 Err(e) => Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     e.to_string(),

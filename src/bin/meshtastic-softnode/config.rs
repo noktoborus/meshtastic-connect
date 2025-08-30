@@ -4,12 +4,9 @@ use serde::{
 };
 use serde_yaml_ng::{from_reader, to_writer};
 
-use meshtastic_connect::{
-    keyring::{
-        key::{K256, Key},
-        node_id::NodeId,
-    },
-    transport::stream::Serial,
+use meshtastic_connect::keyring::{
+    key::{K256, Key},
+    node_id::NodeId,
 };
 use std::{
     fs::File,
@@ -99,6 +96,8 @@ impl<'de> Deserialize<'de> for Hops {
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct SoftNodeChannel {
     pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) disable_encryption: bool,
     pub(crate) hop_start: Hops,
     pub(crate) publish: Vec<publish::Publish>,
 }
@@ -137,11 +136,43 @@ impl Default for Udp {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StreamAPIMethod {
+    // Send messages directly using ToRadio packet
+    // Raw packets is not supported: radio always replaces
+    // MeshPacket's header to self.
+    //
+    // Good choose to set SoftNode settings to radio's values.
+    Direct,
+    // Send messages using MQTT proxy messages.
+    // It is allows to send raw messages, but
+    // all packets got 'via_mqtt' flag.
+    //
+    // Possible to use any SoftNode settings.
+    #[default]
+    MQTTProxy,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub(crate) struct SerialConfig {
+    pub(crate) port: String,
+    pub(crate) baudrate: u32,
+    #[serde(default)]
+    pub(crate) stream_api_method: StreamAPIMethod,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub(crate) struct TCPConfig {
+    pub(crate) address: SocketAddr,
+    #[serde(default)]
+    pub(crate) stream_api_method: StreamAPIMethod,
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) enum SoftNodeTransport {
     UDP(Udp),
-    TCP(SocketAddr),
-    Serial(Serial),
+    TCP(TCPConfig),
+    Serial(SerialConfig),
 }
 
 impl Default for SoftNodeTransport {
@@ -181,6 +212,7 @@ impl Default for SoftNodeConfig {
             public_key,
             channels: vec![SoftNodeChannel {
                 name: "LongFast".into(),
+                disable_encryption: false,
                 hop_start: Hops(7),
                 publish: vec![
                     publish::Publish::NodeInfo(publish::PublishNodeInfo {

@@ -310,7 +310,7 @@ async fn connect_to_stream(
         let stream_data = connection.recv().await.unwrap();
 
         match stream_data {
-            stream::StreamData::Packet(from_radio) => {
+            stream::StreamData::FromRadio(from_radio) => {
                 if let Some(payload_variant) = from_radio.payload_variant {
                     println!("> message id: {:x}", from_radio.id);
                     print_from_radio_payload(payload_variant, keyring, filter_by_nodeid).await;
