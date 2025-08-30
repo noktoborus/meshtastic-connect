@@ -3,7 +3,7 @@ use std::fmt;
 use base64::{Engine, engine::general_purpose};
 use chrono::{TimeZone, Utc};
 
-use crate::meshtastic;
+use crate::{keyring::key::Key, meshtastic};
 
 impl fmt::Display for meshtastic::telemetry::Variant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -431,7 +431,13 @@ impl fmt::Display for meshtastic::User {
                 .as_str_name()
         )?;
 
-        writeln!(f, "  🔐 Public Key: {} bytes", self.public_key.len())?;
+        writeln!(
+            f,
+            "  🔐 Public Key: [{} bytes] {}",
+            self.public_key.len(),
+            Key::try_from(self.public_key.clone())
+                .map_or_else(|e| format!("<Error: {e}>"), |key| key.to_string())
+        )?;
 
         if let Some(unmessagable) = self.is_unmessagable {
             writeln!(

@@ -136,6 +136,15 @@ impl TryFrom<&str> for Key {
             .decode(base64_key)
             .map_err(|e| e.to_string())?;
 
+        Key::try_from(bytes)
+    }
+}
+
+impl TryFrom<Vec<u8>> for Key {
+    type Error = String;
+
+    // From Base64 string
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         match bytes.len() {
             32 => Ok(Key::K256(K256(bytes.try_into().unwrap()))),
             16 => Ok(Key::K128(K128(bytes.try_into().unwrap()))),
