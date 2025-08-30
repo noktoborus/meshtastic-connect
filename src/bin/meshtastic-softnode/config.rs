@@ -217,6 +217,7 @@ impl Default for SoftNodeConfig {
                 publish: vec![
                     publish::Publish::NodeInfo(publish::PublishNodeInfo {
                         interval: Duration::from_secs(900).into(),
+                        ..Default::default()
                     }),
                     publish::Publish::Position(publish::PublishPosition {
                         interval: Duration::from_secs(900).into(),
