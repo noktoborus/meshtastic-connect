@@ -1,10 +1,12 @@
 mod config;
 mod connection;
 mod publish;
+mod router;
 mod schedule;
 mod sqlite;
 
 use clap::Parser;
+use connection::ConnectionAPI;
 use meshtastic_connect::{
     keyring::{
         Keyring,
@@ -101,7 +103,7 @@ async fn handle_timer_event(
 async fn handle_network_event(
     sqlite: &sqlite::SQLite,
     keyring: &Keyring,
-    result: Result<connection::RecvData, Box<dyn std::error::Error>>,
+    result: Result<connection::RecvData, std::io::Error>,
 ) {
     match result {
         Ok(recv_data) => match recv_data {

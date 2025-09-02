@@ -26,22 +26,32 @@ pub enum RecvData {
     Unstructured(Vec<u8>),
 }
 
-impl Connection {
-    pub async fn connect(&mut self) -> Result<(), std::io::Error> {
+pub trait ConnectionAPI {
+    async fn connect(&mut self) -> Result<(), std::io::Error>;
+    async fn disconnect(&mut self);
+    async fn send_mesh(
+        &mut self,
+        mesh_packet: meshtastic::MeshPacket,
+    ) -> Result<(), std::io::Error>;
+    async fn recv_mesh(&mut self) -> Result<RecvData, std::io::Error>;
+}
+
+impl ConnectionAPI for Connection {
+    async fn connect(&mut self) -> Result<(), std::io::Error> {
         match &mut self.connection_type {
             ConnectionType::UDP(multicast) => multicast.connect().await,
             ConnectionType::Stream(stream) => stream.connect().await,
         }
     }
 
-    pub async fn disconnect(&mut self) {
+    async fn disconnect(&mut self) {
         match &mut self.connection_type {
             ConnectionType::UDP(multicast) => multicast.disconnect().await,
             ConnectionType::Stream(stream) => stream.disconnect().await,
         }
     }
 
-    pub async fn send_mesh(
+    async fn send_mesh(
         &mut self,
         mesh_packet: meshtastic::MeshPacket,
     ) -> Result<(), std::io::Error> {
@@ -76,7 +86,7 @@ impl Connection {
         }
     }
 
-    pub async fn recv_mesh(&mut self) -> Result<RecvData, Box<dyn std::error::Error>> {
+    async fn recv_mesh(&mut self) -> Result<RecvData, std::io::Error> {
         match &mut self.connection_type {
             ConnectionType::UDP(multicast) => {
                 let (mesh_packet, _) = multicast.recv().await?;
@@ -139,7 +149,10 @@ impl Connection {
                             _ => Ok(RecvData::Unstructured("got not mesh packet".into())),
                         }
                     } else {
-                        Err("No payload variant".into())
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("No payload data in FromRadio message"),
+                        ))
                     }
                 }
                 transport::stream::StreamData::Unstructured(bytes_mut) => {
@@ -174,13 +187,15 @@ pub fn build(soft_node: &config::SoftNodeConfig) -> Connection {
                 None
             };
 
+            let udp = UDP::new(
+                udp.bind_address.into(),
+                udp.remote_address.into(),
+                multicast_description,
+            );
+
             Connection {
                 stream_api_method: config::StreamAPIMethod::Direct,
-                connection_type: ConnectionType::UDP(UDP::new(
-                    udp.bind_address.into(),
-                    udp.remote_address.into(),
-                    multicast_description,
-                )),
+                connection_type: ConnectionType::UDP(udp),
             }
         }
         config::SoftNodeTransport::TCP(ref tcp_config) => Connection {
@@ -190,15 +205,19 @@ pub fn build(soft_node: &config::SoftNodeConfig) -> Connection {
                 Duration::from_secs(10),
             )),
         },
-        config::SoftNodeTransport::Serial(ref serial_config) => Connection {
-            stream_api_method: serial_config.stream_api_method,
-            connection_type: ConnectionType::Stream(Stream::new(
-                transport::stream::StreamAddress::Serial(Serial {
-                    tty: serial_config.port.clone(),
-                    baudrate: serial_config.baudrate,
-                }),
-                Duration::from_secs(10),
-            )),
-        },
+        config::SoftNodeTransport::Serial(ref serial_config) => {
+            let serial = Serial {
+                tty: serial_config.port.clone(),
+                baudrate: serial_config.baudrate,
+            };
+
+            Connection {
+                stream_api_method: serial_config.stream_api_method,
+                connection_type: ConnectionType::Stream(Stream::new(
+                    transport::stream::StreamAddress::Serial(serial),
+                    Duration::from_secs(10),
+                )),
+            }
+        }
     }
 }

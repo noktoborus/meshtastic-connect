@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     io::ErrorKind,
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
@@ -37,6 +38,23 @@ pub struct UDP {
     pub remote_address: SocketAddr,
     pub join_multicast: Option<Multicast>,
     connection: Option<UdpSocket>,
+}
+
+impl fmt::Display for UDP {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(join_multicast) = self.join_multicast {
+            write!(
+                f,
+                "{}->{} [{}:{}]",
+                self.bind_address,
+                self.remote_address,
+                join_multicast.address,
+                join_multicast.interface.if_addr,
+            )
+        } else {
+            write!(f, "{}->{}", self.bind_address, self.remote_address)
+        }
+    }
 }
 
 impl UDP {
