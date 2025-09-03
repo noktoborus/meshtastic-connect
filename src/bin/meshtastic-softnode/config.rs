@@ -175,15 +175,9 @@ pub(crate) enum SoftNodeTransport {
     Serial(SerialConfig),
 }
 
-impl Default for SoftNodeTransport {
-    fn default() -> Self {
-        Self::UDP(Default::default())
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct SoftNodeConfig {
-    pub(crate) transport: SoftNodeTransport,
+    pub(crate) transport: Vec<SoftNodeTransport>,
     #[serde(default)]
     pub(crate) name: String,
     #[serde(default)]
@@ -204,7 +198,7 @@ impl Default for SoftNodeConfig {
         let public_key = private_key.public_key();
 
         Self {
-            transport: Default::default(),
+            transport: vec![SoftNodeTransport::UDP(Default::default())],
             name: "SoftNode".to_string(),
             short_name: "SFTN".to_string(),
             node_id: NodeId::default(),

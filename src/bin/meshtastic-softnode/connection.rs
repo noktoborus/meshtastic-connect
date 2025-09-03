@@ -163,8 +163,8 @@ impl ConnectionAPI for Connection {
     }
 }
 
-pub fn build(soft_node: &config::SoftNodeConfig) -> Connection {
-    match soft_node.transport {
+pub fn build(transport_config: config::SoftNodeTransport) -> Connection {
+    match transport_config {
         config::SoftNodeTransport::UDP(udp) => {
             let multicast_description = if let Some(multicast) = udp.join_multicast {
                 let multicast_description = Multicast {

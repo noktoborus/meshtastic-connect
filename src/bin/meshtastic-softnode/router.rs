@@ -29,7 +29,8 @@ impl Router {
     }
 }
 
-struct Router {
+#[derive(Default)]
+pub struct Router {
     connections: Vec<Arc<Mutex<connection::Connection>>>,
     recv_set: JoinSet<Result<(Identifier, connection::RecvData), std::io::Error>>,
 }

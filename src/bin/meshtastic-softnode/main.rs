@@ -31,7 +31,7 @@ async fn handle_timer_event(
     schedule: &mut schedule::Schedule,
     soft_node: &SoftNodeConfig,
     keyring: &Keyring,
-    connection: &mut connection::Connection,
+    router: &mut router::Router,
 ) {
     while let Some((_, (channel_idx, publish_idx))) = schedule.pop_if_completed() {
         let channel = &soft_node.channels[channel_idx];
@@ -91,7 +91,7 @@ async fn handle_timer_event(
                 Some(&data.encode_to_vec()),
             )
             .unwrap();
-        connection.send_mesh(mesh_packet).await.unwrap();
+        router.send_mesh(mesh_packet).await.unwrap();
 
         let interval = publish_descriptor.interval();
         if !interval.is_zero() {
@@ -219,12 +219,16 @@ async fn main() {
 
     println!();
     let soft_node = config.soft_node;
-    let mut connection = connection::build(&soft_node);
     let mut schedule = schedule::Schedule::new(&soft_node.channels);
     let sqlite_name = format!("journal-{:x}.sqlite", soft_node.node_id);
     let sqlite = sqlite::SQLite::new(sqlite_name.as_str()).unwrap();
+    let mut router = router::Router::default();
 
-    connection.connect().await.unwrap();
+    for transport in &soft_node.transport {
+        router.add_connection(connection::build(transport.clone()));
+    }
+
+    router.connect().await.unwrap();
 
     loop {
         let next_wakeup = schedule.next_wakeup().unwrap_or_else(|| {
@@ -233,9 +237,9 @@ async fn main() {
 
         tokio::select! {
             _ = sleep_until(next_wakeup) => {
-                handle_timer_event(&sqlite, &mut schedule, &soft_node, &keyring, &mut connection).await;
+                handle_timer_event(&sqlite, &mut schedule, &soft_node, &keyring, &mut router).await;
             },
-            result = connection.recv_mesh() => {
+            result = router.recv_mesh() => {
                 handle_network_event(&sqlite, &keyring, result).await;
             }
         }
