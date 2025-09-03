@@ -126,7 +126,7 @@ pub(crate) struct Udp {
 impl Default for Udp {
     fn default() -> Self {
         Self {
-            bind_address: "224.0.0.69:4403".parse().unwrap(),
+            bind_address: "0.0.0.0:4403".parse().unwrap(),
             remote_address: "224.0.0.69:4403".parse().unwrap(),
             join_multicast: Some(Multicast {
                 multicast: "224.0.0.69".parse().unwrap(),
