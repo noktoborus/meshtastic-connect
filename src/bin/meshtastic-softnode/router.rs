@@ -2,12 +2,16 @@ use std::sync::Arc;
 
 use tokio::{sync::Mutex, task::JoinSet};
 
+pub type ConnectionName = String;
 type Identifier = usize;
 use crate::connection::{self, ConnectionAPI};
 
 impl Router {
-    pub fn add_connection(&mut self, connection: connection::Connection) {
-        self.connections.push(Arc::new(Mutex::new(connection)));
+    pub fn add_connection(&mut self, connection_name: String, connection: connection::Connection) {
+        self.connections.push(Arc::new(ConnectionCapsule {
+            name: connection_name,
+            connection: Mutex::new(connection),
+        }));
     }
 
     // Send a mesh packet to all connections except the one specified by `from`
@@ -17,34 +21,46 @@ impl Router {
         mesh_packet: &meshtastic_connect::meshtastic::MeshPacket,
         from: Option<Identifier>,
     ) {
-        for (index, conn) in self.connections.iter_mut().enumerate() {
+        for (index, capsule) in self.connections.iter_mut().enumerate() {
             if let Some(from) = from {
                 if index == from {
                     continue;
                 }
             }
-            let conn = conn.clone();
+            let capsule = capsule.clone();
             let mesh_packet = mesh_packet.clone();
             let channel = channel.clone();
-            tokio::spawn(async move { conn.lock().await.send_mesh(channel, mesh_packet).await });
+            tokio::spawn(async move {
+                capsule
+                    .connection
+                    .lock()
+                    .await
+                    .send_mesh(channel, mesh_packet)
+                    .await
+            });
         }
     }
 }
 
+pub struct ConnectionCapsule {
+    name: ConnectionName,
+    connection: Mutex<connection::Connection>,
+}
+
 #[derive(Default)]
 pub struct Router {
-    connections: Vec<Arc<Mutex<connection::Connection>>>,
+    connections: Vec<Arc<ConnectionCapsule>>,
     recv_set: JoinSet<Result<(Identifier, connection::RecvData), std::io::Error>>,
 }
 
-impl ConnectionAPI for Router {
+impl Router {
     /// Connect all connections
-    async fn connect(&mut self) -> Result<(), std::io::Error> {
+    pub async fn connect(&mut self) -> Result<(), std::io::Error> {
         let mut set = JoinSet::new();
 
-        for conn in &mut self.connections {
-            let conn = conn.clone();
-            set.spawn(async move { conn.lock().await.connect().await });
+        for capsule in &mut self.connections {
+            let capsule = capsule.clone();
+            set.spawn(async move { capsule.connection.lock().await.connect().await });
         }
 
         while let Some(res) = set.join_next().await {
@@ -56,25 +72,32 @@ impl ConnectionAPI for Router {
             }
         }
 
-        for (identifier, conn) in self.connections.iter_mut().enumerate() {
-            let conn = conn.clone();
-            self.recv_set
-                .spawn(async move { conn.lock().await.recv_mesh().await.map(|r| (identifier, r)) });
+        for (identifier, capsule) in self.connections.iter_mut().enumerate() {
+            let capsule = capsule.clone();
+            self.recv_set.spawn(async move {
+                capsule
+                    .connection
+                    .lock()
+                    .await
+                    .recv_mesh()
+                    .await
+                    .map(|r| (identifier, r))
+            });
         }
 
         Ok(())
     }
 
     /// Disconnect all connections
-    async fn disconnect(&mut self) {
-        for conn in &mut self.connections {
-            let conn = conn.clone();
-            tokio::spawn(async move { conn.lock().await.disconnect().await });
+    pub async fn disconnect(&mut self) {
+        for capsule in &mut self.connections {
+            let capsule = capsule.clone();
+            tokio::spawn(async move { capsule.connection.lock().await.disconnect().await });
         }
     }
 
     // Send to all connections
-    async fn send_mesh(
+    pub async fn send_mesh(
         &mut self,
         channel: Option<String>,
         mesh_packet: meshtastic_connect::meshtastic::MeshPacket,
@@ -84,7 +107,9 @@ impl ConnectionAPI for Router {
     }
 
     // Try to receive from all connections and send to all, except received
-    async fn recv_mesh(&mut self) -> Result<connection::RecvData, std::io::Error> {
+    pub async fn recv_mesh(
+        &mut self,
+    ) -> Result<(ConnectionName, connection::RecvData), std::io::Error> {
         while let Some(res) = self.recv_set.join_next().await {
             let (identifier, data) = res.map_err(|e| {
                 std::io::Error::new(std::io::ErrorKind::Other, format!("thread panicked: {}", e))
@@ -100,7 +125,8 @@ impl ConnectionAPI for Router {
                     .await;
             }
 
-            return Ok(data);
+            let capsule = &self.connections[identifier];
+            return Ok((capsule.name.clone(), data));
         }
 
         Err(std::io::Error::new(

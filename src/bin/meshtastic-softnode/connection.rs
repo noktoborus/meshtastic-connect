@@ -189,8 +189,8 @@ pub fn build(
     transport_config: config::SoftNodeTransport,
     soft_node: &SoftNodeConfig,
 ) -> Connection {
-    match transport_config {
-        config::SoftNodeTransport::UDP(udp) => {
+    match transport_config.variant {
+        config::SoftNodeVariant::UDP(udp) => {
             let multicast_description = if let Some(multicast) = udp.join_multicast {
                 let multicast_description = Multicast {
                     address: multicast.multicast,
@@ -223,14 +223,14 @@ pub fn build(
                 connection_type: ConnectionType::UDP(udp),
             }
         }
-        config::SoftNodeTransport::TCP(ref tcp_config) => Connection {
+        config::SoftNodeVariant::TCP(ref tcp_config) => Connection {
             stream_api_method: tcp_config.stream_api_method,
             connection_type: ConnectionType::Stream(Stream::new(
                 transport::stream::StreamAddress::TCPSocket(tcp_config.address),
                 Duration::from_secs(10),
             )),
         },
-        config::SoftNodeTransport::Serial(ref serial_config) => {
+        config::SoftNodeVariant::Serial(ref serial_config) => {
             let serial = Serial {
                 tty: serial_config.port.clone(),
                 baudrate: serial_config.baudrate,
@@ -244,7 +244,7 @@ pub fn build(
                 )),
             }
         }
-        config::SoftNodeTransport::MQTT(mqttconfig) => {
+        config::SoftNodeVariant::MQTT(mqttconfig) => {
             let mqtt = MQTT::new(
                 mqttconfig.server,
                 mqttconfig.username.clone(),

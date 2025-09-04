@@ -178,11 +178,27 @@ pub(crate) struct TCPConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub(crate) enum SoftNodeTransport {
+pub(crate) enum SoftNodeVariant {
     UDP(Udp),
     TCP(TCPConfig),
     Serial(SerialConfig),
     MQTT(MQTTConfig),
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub(crate) struct SoftNodeTransport {
+    pub(crate) name: String,
+    #[serde(flatten)]
+    pub(crate) variant: SoftNodeVariant,
+}
+
+impl Default for SoftNodeTransport {
+    fn default() -> Self {
+        Self {
+            name: "UDP Multicast".to_string(),
+            variant: SoftNodeVariant::UDP(Udp::default()),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -208,7 +224,7 @@ impl Default for SoftNodeConfig {
         let public_key = private_key.public_key();
 
         Self {
-            transport: vec![SoftNodeTransport::UDP(Default::default())],
+            transport: vec![Default::default()],
             name: "SoftNode".to_string(),
             short_name: "SFTN".to_string(),
             node_id: NodeId::default(),
