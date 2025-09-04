@@ -115,7 +115,7 @@ async fn handle_network_event(
 ) {
     match recv_data {
         connection::RecvData::MeshPacket(mesh_packet) => {
-            println!("received mesh packet: {:?}", mesh_packet);
+            println!("{:?} received: {:?}", connection_name, mesh_packet);
             println!();
             if let Some(ref payload_variant) = mesh_packet.payload_variant {
                 match payload_variant {
