@@ -43,7 +43,7 @@ impl MQTT {
 
     pub async fn connect(&mut self) -> Result<(), std::io::Error> {
         let mut mqttoptions = MqttOptions::new(
-            format!("Meshtastic({})", self.gateway),
+            self.gateway.to_string(),
             self.server.ip().to_string(),
             self.server.port(),
         );
