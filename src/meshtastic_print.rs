@@ -1,5 +1,4 @@
 use crate::keyring::cryptor::Decrypt;
-use crate::keyring::node_id::NodeId;
 use crate::{
     keyring::Keyring,
     meshtastic::{self, Data, MeshPacket, from_radio},
@@ -73,26 +72,9 @@ async fn print_decoded(data: Data) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn print_mesh_packet(
-    mesh_packet: MeshPacket,
-    channel_list: &Keyring,
-    filter_by_nodeid: &Vec<NodeId>,
-) {
-    let fmt = |nodeid| {
-        let nodeid = NodeId::from(nodeid);
-        if filter_by_nodeid
-            .iter()
-            .find(|filtered_nodeid| **filtered_nodeid == nodeid)
-            .is_some()
-        {
-            format!("\x1b[1;31m{}\x1b[0m", nodeid)
-        } else {
-            format!("{}", nodeid)
-        }
-    };
-
-    let from_formatted = fmt(mesh_packet.from);
-    let to_formatted = fmt(mesh_packet.to);
+pub async fn print_mesh_packet(mesh_packet: MeshPacket, channel_list: &Keyring) {
+    let from_formatted = mesh_packet.from.to_string();
+    let to_formatted = mesh_packet.to.to_string();
 
     println!(
         "- from={} to={} channel=0x{:0>2x} [id:{}]{} hop={{{}/{}}} want_ack={} (PKI ENC={})",
@@ -162,16 +144,12 @@ pub async fn print_mesh_packet(
     }
 }
 
-pub async fn print_service_envelope(
-    packet: Bytes,
-    channel_list: &Keyring,
-    filter_by_nodeid: &Vec<NodeId>,
-) {
+pub async fn print_service_envelope(packet: Bytes, channel_list: &Keyring) {
     if let Ok(service) = meshtastic::ServiceEnvelope::decode(packet.clone()) {
         if let Some(mesh_packet) = service.packet {
             println!("- chan={:?} gw={}", service.channel_id, service.gateway_id,);
 
-            print_mesh_packet(mesh_packet, channel_list, filter_by_nodeid).await;
+            print_mesh_packet(mesh_packet, channel_list).await;
         } else {
             println!(
                 "- chan={:?} gw={} <no data>",
@@ -182,14 +160,10 @@ pub async fn print_service_envelope(
     }
 }
 
-pub async fn print_from_radio_payload(
-    payload: from_radio::PayloadVariant,
-    channel_list: &Keyring,
-    filter_by_nodeid: &Vec<NodeId>,
-) {
+pub async fn print_from_radio_payload(payload: from_radio::PayloadVariant, channel_list: &Keyring) {
     match payload {
         from_radio::PayloadVariant::Packet(mesh_packet) => {
-            print_mesh_packet(mesh_packet, channel_list, filter_by_nodeid).await
+            print_mesh_packet(mesh_packet, channel_list).await
         }
         from_radio::PayloadVariant::LogRecord(log_record) => {
             println!("- LogRecord {{ {:?} }}", log_record)

@@ -198,7 +198,6 @@ async fn main() {
     println!("=== ===");
 
     let mut keyring = Keyring::new();
-    let mut filter_by_nodeid: Vec<NodeId> = Default::default();
 
     for channel in config.keys.channels {
         keyring
@@ -240,8 +239,7 @@ async fn main() {
                     match packet {
                         rumqttc::Packet::Publish(publish) => {
                             println!("> {} [size: {}] ", publish.topic, publish.payload.len());
-                            print_service_envelope(publish.payload, &keyring, &filter_by_nodeid)
-                                .await;
+                            print_service_envelope(publish.payload, &keyring).await;
                         }
                         rumqttc::Packet::PingReq => {}
                         rumqttc::Packet::PingResp => {}
@@ -260,7 +258,7 @@ async fn main() {
                 Duration::from_secs(tcp.heartbeat_seconds),
             );
 
-            connect_to_stream(connection, &keyring, &filter_by_nodeid).await;
+            connect_to_stream(connection, &keyring).await;
         }
         Mode::Serial(serial) => {
             println!(
@@ -276,7 +274,7 @@ async fn main() {
                 Duration::from_secs(serial.heartbeat_seconds),
             );
 
-            connect_to_stream(connection, &keyring, &filter_by_nodeid).await;
+            connect_to_stream(connection, &keyring).await;
         }
         Mode::Multicast(multicast) => {
             println!("Listen multicast on {}", multicast.listen_address);
@@ -296,7 +294,7 @@ async fn main() {
             loop {
                 let (mesh_packet, _) = connection.recv().await.unwrap();
 
-                print_mesh_packet(mesh_packet, &keyring, &filter_by_nodeid).await;
+                print_mesh_packet(mesh_packet, &keyring).await;
 
                 println!();
             }
@@ -304,11 +302,7 @@ async fn main() {
     }
 }
 
-async fn connect_to_stream(
-    mut connection: Stream,
-    keyring: &Keyring,
-    filter_by_nodeid: &Vec<NodeId>,
-) {
+async fn connect_to_stream(mut connection: Stream, keyring: &Keyring) {
     connection.connect().await.unwrap();
     loop {
         let stream_data = connection.recv().await.unwrap();
@@ -317,7 +311,7 @@ async fn connect_to_stream(
             stream::StreamData::FromRadio(from_radio) => {
                 if let Some(payload_variant) = from_radio.payload_variant {
                     println!("> message id: {:x}", from_radio.id);
-                    print_from_radio_payload(payload_variant, keyring, filter_by_nodeid).await;
+                    print_from_radio_payload(payload_variant, keyring).await;
                 } else {
                     println!("> message id: {:x} no payload", from_radio.id);
                 }

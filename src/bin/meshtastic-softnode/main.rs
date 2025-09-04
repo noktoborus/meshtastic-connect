@@ -6,7 +6,6 @@ mod schedule;
 mod sqlite;
 
 use clap::Parser;
-use connection::ConnectionAPI;
 use meshtastic_connect::{
     keyring::{
         Keyring,
