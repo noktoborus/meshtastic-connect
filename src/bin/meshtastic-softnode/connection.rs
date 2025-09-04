@@ -223,14 +223,23 @@ pub fn build(
                 connection_type: ConnectionType::UDP(udp),
             }
         }
-        config::SoftNodeVariant::TCP(ref tcp_config) => Connection {
-            stream_api_method: tcp_config.stream_api_method,
-            connection_type: ConnectionType::Stream(Stream::new(
-                transport::stream::StreamAddress::TCPSocket(tcp_config.address),
-                Duration::from_secs(10),
-            )),
-        },
+        config::SoftNodeVariant::TCP(ref tcp_config) => {
+            println!("Connect TCP to {}", tcp_config.address);
+
+            Connection {
+                stream_api_method: tcp_config.stream_api_method,
+                connection_type: ConnectionType::Stream(Stream::new(
+                    transport::stream::StreamAddress::TCPSocket(tcp_config.address),
+                    Duration::from_secs(10),
+                )),
+            }
+        }
         config::SoftNodeVariant::SERIAL(ref serial_config) => {
+            println!(
+                "Connect SERIAL to {} baudrate {}",
+                serial_config.port, serial_config.baudrate
+            );
+
             let serial = Serial {
                 tty: serial_config.port.clone(),
                 baudrate: serial_config.baudrate,
@@ -245,6 +254,11 @@ pub fn build(
             }
         }
         config::SoftNodeVariant::MQTT(mqttconfig) => {
+            println!(
+                "Connect MQTT to {}@{} {}",
+                mqttconfig.username, mqttconfig.server, mqttconfig.topic
+            );
+
             let mqtt = MQTT::new(
                 mqttconfig.server,
                 mqttconfig.username.clone(),
