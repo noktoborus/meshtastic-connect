@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::{sync::Mutex, task::JoinSet};
 
 pub type ConnectionName = String;
-type Identifier = usize;
+type ArcConnectionCapsule = Arc<ConnectionCapsule>;
 use crate::{
     config::{TransportQuirk, TransportQuirks},
     connection::{self, ConnectionAPI},
@@ -17,6 +17,7 @@ impl Router {
         connection: connection::Connection,
     ) {
         self.connections.push(Arc::new(ConnectionCapsule {
+            id: self.connections.len(),
             name: connection_name,
             quirks,
             connection: Mutex::new(connection),
@@ -28,11 +29,11 @@ impl Router {
         &mut self,
         channel: Option<String>,
         mesh_packet: &meshtastic_connect::meshtastic::MeshPacket,
-        from: Option<Identifier>,
+        from: Option<ArcConnectionCapsule>,
     ) {
-        for (index, capsule) in self.connections.iter_mut().enumerate() {
-            if let Some(from) = from {
-                if index == from {
+        for capsule in self.connections.iter_mut() {
+            if let Some(ref from) = from {
+                if capsule.id == from.id {
                     continue;
                 }
             }
@@ -53,7 +54,8 @@ impl Router {
     }
 }
 
-pub struct ConnectionCapsule {
+struct ConnectionCapsule {
+    id: usize,
     name: ConnectionName,
     quirks: TransportQuirks,
     connection: Mutex<connection::Connection>,
@@ -61,8 +63,8 @@ pub struct ConnectionCapsule {
 
 #[derive(Default)]
 pub struct Router {
-    connections: Vec<Arc<ConnectionCapsule>>,
-    recv_set: JoinSet<Result<(Identifier, connection::RecvData), std::io::Error>>,
+    connections: Vec<ArcConnectionCapsule>,
+    recv_set: JoinSet<Result<(ArcConnectionCapsule, connection::RecvData), std::io::Error>>,
 }
 
 impl Router {
@@ -84,7 +86,7 @@ impl Router {
             }
         }
 
-        for (identifier, capsule) in self.connections.iter_mut().enumerate() {
+        for capsule in self.connections.iter_mut() {
             let capsule = capsule.clone();
             self.recv_set.spawn(async move {
                 capsule
@@ -93,7 +95,7 @@ impl Router {
                     .await
                     .recv_mesh()
                     .await
-                    .map(|r| (identifier, r))
+                    .map(|r| (capsule.clone(), r))
             });
         }
 
@@ -123,10 +125,9 @@ impl Router {
         &mut self,
     ) -> Result<(ConnectionName, connection::RecvData), std::io::Error> {
         while let Some(res) = self.recv_set.join_next().await {
-            let (identifier, mut data) = res.map_err(|e| {
+            let (capsule, mut data) = res.map_err(|e| {
                 std::io::Error::new(std::io::ErrorKind::Other, format!("thread panicked: {}", e))
             })??;
-            let capsule = self.connections[identifier].clone();
 
             if let connection::RecvData::MeshPacket(ref mut mesh_packet) = data {
                 apply_quirk_to_packet(mesh_packet, &capsule.quirks.input);
@@ -135,7 +136,7 @@ impl Router {
                 } else {
                     Some("".to_string())
                 };
-                self.send_mesh_except(channel, mesh_packet, Some(identifier))
+                self.send_mesh_except(channel, mesh_packet, Some(capsule.clone()))
                     .await;
             }
 
@@ -147,7 +148,7 @@ impl Router {
                     .await
                     .recv_mesh()
                     .await
-                    .map(|r| (identifier, r))
+                    .map(|r| (capsule.clone(), r))
             });
             return Ok((connection_name, data));
         }
