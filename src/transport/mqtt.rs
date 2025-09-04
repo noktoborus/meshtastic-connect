@@ -1,6 +1,6 @@
 use crate::{keyring::node_id::NodeId, meshtastic};
 use prost::Message;
-use rumqttc::{Client, Connection, MqttOptions, QoS};
+use rumqttc::{AsyncClient, EventLoop, MqttOptions, QoS};
 use std::{net::SocketAddr, time::Duration};
 
 // Root topic
@@ -9,8 +9,8 @@ type Topic = String;
 type ChannelId = String;
 
 struct MQTTConnection {
-    client: Client,
-    event_loop: Connection,
+    client: AsyncClient,
+    event_loop: EventLoop,
 }
 
 pub struct MQTT {
@@ -51,13 +51,16 @@ impl MQTT {
         mqttoptions.set_credentials(self.username.clone(), self.password.clone());
 
         let topic = format!("{}/+/+", self.topic);
-        let (client, event_loop) = Client::new(mqttoptions, 30);
-        client.subscribe(topic, QoS::AtMostOnce).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("MQTT subscription failed: {}", e),
-            )
-        })?;
+        let (client, event_loop) = AsyncClient::new(mqttoptions, 30);
+        client
+            .subscribe(topic, QoS::AtMostOnce)
+            .await
+            .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("MQTT subscription failed: {}", e),
+                )
+            })?;
         self.connection = Some(MQTTConnection { client, event_loop });
         Ok(())
     }
@@ -71,21 +74,9 @@ impl MQTT {
                 "Not connected",
             )),
             Some(ref mut connection) => loop {
-                let event = connection
-                    .event_loop
-                    .recv()
-                    .map_err(|e| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!("Recv error: {:?}", e),
-                        )
-                    })?
-                    .map_err(|e| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!("Connection error: {:?}", e),
-                        )
-                    })?;
+                let event = connection.event_loop.poll().await.map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::Other, format!("Recv error: {:?}", e))
+                })?;
 
                 if let rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish)) = event {
                     let service_envelope = meshtastic::ServiceEnvelope::decode(
@@ -141,6 +132,7 @@ impl MQTT {
                         false,
                         service_envelope.encode_to_vec(),
                     )
+                    .await
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
                 Ok(())
