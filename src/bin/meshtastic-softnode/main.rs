@@ -18,7 +18,10 @@ use prost::Message;
 use publish::Publishable;
 use rand::Rng;
 use router::ConnectionName;
-use std::{process, time::Duration};
+use std::{
+    process::{self, exit},
+    time::Duration,
+};
 use tokio::{
     io::AsyncWriteExt,
     time::{Instant, sleep_until},
@@ -253,7 +256,7 @@ async fn main() {
                     Ok((name, recv_data)) => { handle_network_event(&sqlite, &keyring, name, recv_data).await; }
                     Err(err) => {
                         println!("handle error: {}", err);
-                        println!();
+                        exit(1);
                     }
                 }
             }
