@@ -91,7 +91,10 @@ async fn handle_timer_event(
                 Some(&data.encode_to_vec()),
             )
             .unwrap();
-        router.send_mesh(mesh_packet).await.unwrap();
+        router
+            .send_mesh(Some(channel.name.clone()), mesh_packet)
+            .await
+            .unwrap();
 
         let interval = publish_descriptor.interval();
         if !interval.is_zero() {
@@ -225,7 +228,7 @@ async fn main() {
     let mut router = router::Router::default();
 
     for transport in &soft_node.transport {
-        router.add_connection(connection::build(transport.clone()));
+        router.add_connection(connection::build(transport.clone(), &soft_node));
     }
 
     router.connect().await.unwrap();

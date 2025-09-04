@@ -38,14 +38,23 @@ pub(crate) struct TransitConfig {
     pub(crate) from: Vec<NodeId>,
 }
 
-#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct MQTTConfig {
-    pub(crate) server_addr: String,
-    pub(crate) server_port: u16,
+    pub(crate) server: SocketAddr,
     pub(crate) username: String,
     pub(crate) password: String,
-    pub(crate) subscribe: Vec<String>,
-    pub(crate) filter: TransitConfig,
+    pub(crate) topic: String,
+}
+
+impl Default for MQTTConfig {
+    fn default() -> Self {
+        Self {
+            server: "127.0.0.1:1883".parse().unwrap(),
+            username: String::new(),
+            password: String::new(),
+            topic: "msh".into(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -173,6 +182,7 @@ pub(crate) enum SoftNodeTransport {
     UDP(Udp),
     TCP(TCPConfig),
     Serial(SerialConfig),
+    MQTT(MQTTConfig),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]

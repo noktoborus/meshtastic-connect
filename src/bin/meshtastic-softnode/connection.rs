@@ -1,9 +1,10 @@
-use crate::config;
+use crate::{SoftNodeConfig, config};
 use meshtastic_connect::{
     keyring::node_id::NodeId,
     meshtastic::{self, ServiceEnvelope},
     transport::{
         self, if_index_by_addr,
+        mqtt::MQTT,
         stream::{Serial, Stream},
         udp::{Interface, Multicast, UDP},
     },
@@ -14,6 +15,7 @@ use std::time::Duration;
 enum ConnectionType {
     UDP(UDP),
     Stream(Stream),
+    MQTT(MQTT),
 }
 
 pub struct Connection {
@@ -31,6 +33,7 @@ pub trait ConnectionAPI {
     async fn disconnect(&mut self);
     async fn send_mesh(
         &mut self,
+        channel: Option<String>,
         mesh_packet: meshtastic::MeshPacket,
     ) -> Result<(), std::io::Error>;
     async fn recv_mesh(&mut self) -> Result<RecvData, std::io::Error>;
@@ -41,6 +44,7 @@ impl ConnectionAPI for Connection {
         match &mut self.connection_type {
             ConnectionType::UDP(multicast) => multicast.connect().await,
             ConnectionType::Stream(stream) => stream.connect().await,
+            ConnectionType::MQTT(mqtt) => mqtt.connect().await,
         }
     }
 
@@ -48,11 +52,13 @@ impl ConnectionAPI for Connection {
         match &mut self.connection_type {
             ConnectionType::UDP(multicast) => multicast.disconnect().await,
             ConnectionType::Stream(stream) => stream.disconnect().await,
+            ConnectionType::MQTT(mqtt) => mqtt.disconnect().await,
         }
     }
 
     async fn send_mesh(
         &mut self,
+        channel: Option<String>,
         mesh_packet: meshtastic::MeshPacket,
     ) -> Result<(), std::io::Error> {
         match &mut self.connection_type {
@@ -83,6 +89,7 @@ impl ConnectionAPI for Connection {
                     stream.send(to_radio).await
                 }
             },
+            ConnectionType::MQTT(mqtt) => mqtt.send(channel, mesh_packet).await,
         }
     }
 
@@ -123,22 +130,22 @@ impl ConnectionAPI for Connection {
                                 } else {
                                     if let Some(payload_variant) = mqtt_proxy_msg.payload_variant {
                                         match payload_variant {
-                                        meshtastic::mqtt_client_proxy_message::PayloadVariant::Data(items) => {
-                                            match meshtastic::ServiceEnvelope::decode(items.as_slice()) {
-                                                Ok(service_envelope) => {
-                                                    if let Some(mesh_packet) = service_envelope.packet {
-                                                        Ok(RecvData::MeshPacket(mesh_packet))
-                                                    } else {
-                                                        Ok(RecvData::Unstructured(format!("MQTT ServiceEnvelope: no Packet").into()))
+                                                meshtastic::mqtt_client_proxy_message::PayloadVariant::Data(items) => {
+                                                    match meshtastic::ServiceEnvelope::decode(items.as_slice()) {
+                                                        Ok(service_envelope) => {
+                                                            if let Some(mesh_packet) = service_envelope.packet {
+                                                                Ok(RecvData::MeshPacket(mesh_packet))
+                                                            } else {
+                                                                Ok(RecvData::Unstructured(format!("MQTT ServiceEnvelope: no Packet").into()))
+                                                            }
+                                                        },
+                                                        Err(e) =>  Ok(RecvData::Unstructured(format!("MQTT ServiceEnvelope::decode: {e}").into())),
                                                     }
+
+
                                                 },
-                                                Err(e) =>  Ok(RecvData::Unstructured(format!("MQTT ServiceEnvelope::decode: {e}").into())),
+                                                meshtastic::mqtt_client_proxy_message::PayloadVariant::Text(text) => Ok(RecvData::Unstructured(format!("MQTT proto: got text: {:?}", text).into())),
                                             }
-
-
-                                        },
-                                        meshtastic::mqtt_client_proxy_message::PayloadVariant::Text(text) => Ok(RecvData::Unstructured(format!("MQTT proto: got text: {:?}", text).into())),
-                                    }
                                     } else {
                                         Ok(RecvData::Unstructured(
                                             "MQTT proto: no payload data".into(),
@@ -159,11 +166,29 @@ impl ConnectionAPI for Connection {
                     Ok(RecvData::Unstructured(bytes_mut.to_vec()))
                 }
             },
+            ConnectionType::MQTT(mqtt) => {
+                let (mesh_packet_or_not, channel_id, node_id) = mqtt.recv().await?;
+
+                if let Some(mesh_packet) = mesh_packet_or_not {
+                    Ok(RecvData::MeshPacket(mesh_packet))
+                } else {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!(
+                            "No MeshPacket from mqtt channel {:?} (node_id: {:?})",
+                            channel_id, node_id
+                        ),
+                    ))
+                }
+            }
         }
     }
 }
 
-pub fn build(transport_config: config::SoftNodeTransport) -> Connection {
+pub fn build(
+    transport_config: config::SoftNodeTransport,
+    soft_node: &SoftNodeConfig,
+) -> Connection {
     match transport_config {
         config::SoftNodeTransport::UDP(udp) => {
             let multicast_description = if let Some(multicast) = udp.join_multicast {
@@ -217,6 +242,20 @@ pub fn build(transport_config: config::SoftNodeTransport) -> Connection {
                     transport::stream::StreamAddress::Serial(serial),
                     Duration::from_secs(10),
                 )),
+            }
+        }
+        config::SoftNodeTransport::MQTT(mqttconfig) => {
+            let mqtt = MQTT::new(
+                mqttconfig.server,
+                mqttconfig.username.clone(),
+                mqttconfig.password.clone(),
+                soft_node.node_id,
+                mqttconfig.topic.clone(),
+            );
+
+            Connection {
+                stream_api_method: config::StreamAPIMethod::Direct,
+                connection_type: ConnectionType::MQTT(mqtt),
             }
         }
     }

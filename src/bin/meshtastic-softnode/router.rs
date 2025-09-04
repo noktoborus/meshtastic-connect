@@ -13,6 +13,7 @@ impl Router {
     // Send a mesh packet to all connections except the one specified by `from`
     async fn send_mesh_except(
         &mut self,
+        channel: Option<String>,
         mesh_packet: &meshtastic_connect::meshtastic::MeshPacket,
         from: Option<Identifier>,
     ) {
@@ -24,7 +25,8 @@ impl Router {
             }
             let conn = conn.clone();
             let mesh_packet = mesh_packet.clone();
-            tokio::spawn(async move { conn.lock().await.send_mesh(mesh_packet).await });
+            let channel = channel.clone();
+            tokio::spawn(async move { conn.lock().await.send_mesh(channel, mesh_packet).await });
         }
     }
 }
@@ -74,9 +76,10 @@ impl ConnectionAPI for Router {
     // Send to all connections
     async fn send_mesh(
         &mut self,
+        channel: Option<String>,
         mesh_packet: meshtastic_connect::meshtastic::MeshPacket,
     ) -> Result<(), std::io::Error> {
-        self.send_mesh_except(&mesh_packet, None).await;
+        self.send_mesh_except(channel, &mesh_packet, None).await;
         Ok(())
     }
 
@@ -88,7 +91,13 @@ impl ConnectionAPI for Router {
             })??;
 
             if let connection::RecvData::MeshPacket(ref mesh_packet) = data {
-                self.send_mesh_except(mesh_packet, Some(identifier)).await;
+                let channel = if mesh_packet.channel == 0 {
+                    None
+                } else {
+                    Some("".to_string())
+                };
+                self.send_mesh_except(channel, mesh_packet, Some(identifier))
+                    .await;
             }
 
             return Ok(data);
