@@ -230,7 +230,7 @@ pub fn build(
                 Duration::from_secs(10),
             )),
         },
-        config::SoftNodeVariant::Serial(ref serial_config) => {
+        config::SoftNodeVariant::SERIAL(ref serial_config) => {
             let serial = Serial {
                 tty: serial_config.port.clone(),
                 baudrate: serial_config.baudrate,

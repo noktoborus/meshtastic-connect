@@ -181,7 +181,7 @@ pub(crate) struct TCPConfig {
 pub(crate) enum SoftNodeVariant {
     UDP(Udp),
     TCP(TCPConfig),
-    Serial(SerialConfig),
+    SERIAL(SerialConfig),
     MQTT(MQTTConfig),
 }
 
