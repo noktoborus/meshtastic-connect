@@ -186,8 +186,29 @@ pub(crate) enum SoftNodeVariant {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub(crate) enum TransportQuirk {
+    // Update 'hop_limit' value to one greater than the current value.
+    // It is suitable if you want to hide current node from the network.
+    // Some transports, like UDP multicast in original meshtastic's firmware
+    // decrement hop_limit by one and send it to local network.
+    IncrementHopLimit,
+    // Set 'via_mqtt' flag to true in MeshPacket.
+    // Suitable for MQTT transport.
+    SetViaMQTT,
+    // Set 'via_mqtt' flag to false in MeshPacket.
+    UnsetViaMQTT,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub(crate) struct TransportQuirks {
+    pub(crate) input: Vec<TransportQuirk>,
+    pub(crate) output: Vec<TransportQuirk>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct SoftNodeTransport {
     pub(crate) name: String,
+    pub(crate) quirks: TransportQuirks,
     #[serde(flatten)]
     pub(crate) variant: SoftNodeVariant,
 }
@@ -196,6 +217,10 @@ impl Default for SoftNodeTransport {
     fn default() -> Self {
         Self {
             name: "UDP Multicast".to_string(),
+            quirks: TransportQuirks {
+                input: vec![TransportQuirk::IncrementHopLimit],
+                output: vec![],
+            },
             variant: SoftNodeVariant::UDP(Udp::default()),
         }
     }

@@ -233,6 +233,7 @@ async fn main() {
     for transport in &soft_node.transport {
         router.add_connection(
             transport.name.clone(),
+            transport.quirks.clone(),
             connection::build(transport.clone(), &soft_node),
         );
     }

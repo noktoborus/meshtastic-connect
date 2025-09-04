@@ -4,12 +4,21 @@ use tokio::{sync::Mutex, task::JoinSet};
 
 pub type ConnectionName = String;
 type Identifier = usize;
-use crate::connection::{self, ConnectionAPI};
+use crate::{
+    config::{TransportQuirk, TransportQuirks},
+    connection::{self, ConnectionAPI},
+};
 
 impl Router {
-    pub fn add_connection(&mut self, connection_name: String, connection: connection::Connection) {
+    pub fn add_connection(
+        &mut self,
+        connection_name: String,
+        quirks: TransportQuirks,
+        connection: connection::Connection,
+    ) {
         self.connections.push(Arc::new(ConnectionCapsule {
             name: connection_name,
+            quirks,
             connection: Mutex::new(connection),
         }));
     }
@@ -28,8 +37,10 @@ impl Router {
                 }
             }
             let capsule = capsule.clone();
-            let mesh_packet = mesh_packet.clone();
+            let mut mesh_packet = mesh_packet.clone();
             let channel = channel.clone();
+
+            apply_quirk_to_packet(&mut mesh_packet, &capsule.quirks.output);
             tokio::spawn(async move {
                 capsule
                     .connection
@@ -44,6 +55,7 @@ impl Router {
 
 pub struct ConnectionCapsule {
     name: ConnectionName,
+    quirks: TransportQuirks,
     connection: Mutex<connection::Connection>,
 }
 
@@ -111,11 +123,13 @@ impl Router {
         &mut self,
     ) -> Result<(ConnectionName, connection::RecvData), std::io::Error> {
         while let Some(res) = self.recv_set.join_next().await {
-            let (identifier, data) = res.map_err(|e| {
+            let (identifier, mut data) = res.map_err(|e| {
                 std::io::Error::new(std::io::ErrorKind::Other, format!("thread panicked: {}", e))
             })??;
+            let connection_name = self.connections[identifier].name.clone();
 
-            if let connection::RecvData::MeshPacket(ref mesh_packet) = data {
+            if let connection::RecvData::MeshPacket(ref mut mesh_packet) = data {
+                apply_quirk_to_packet(mesh_packet, &self.connections[identifier].quirks.input);
                 let channel = if mesh_packet.channel == 0 {
                     None
                 } else {
@@ -125,13 +139,25 @@ impl Router {
                     .await;
             }
 
-            let capsule = &self.connections[identifier];
-            return Ok((capsule.name.clone(), data));
+            return Ok((connection_name, data));
         }
 
         Err(std::io::Error::new(
             std::io::ErrorKind::Other,
             format!("No connections available"),
         ))
+    }
+}
+
+fn apply_quirk_to_packet(
+    mesh_packet: &mut meshtastic_connect::meshtastic::MeshPacket,
+    quirks: &Vec<TransportQuirk>,
+) {
+    for quirk in quirks {
+        match quirk {
+            TransportQuirk::IncrementHopLimit => mesh_packet.hop_limit += 1,
+            TransportQuirk::SetViaMQTT => mesh_packet.via_mqtt = true,
+            TransportQuirk::UnsetViaMQTT => mesh_packet.via_mqtt = false,
+        }
     }
 }
