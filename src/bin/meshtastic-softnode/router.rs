@@ -126,10 +126,10 @@ impl Router {
             let (identifier, mut data) = res.map_err(|e| {
                 std::io::Error::new(std::io::ErrorKind::Other, format!("thread panicked: {}", e))
             })??;
-            let connection_name = self.connections[identifier].name.clone();
+            let capsule = self.connections[identifier].clone();
 
             if let connection::RecvData::MeshPacket(ref mut mesh_packet) = data {
-                apply_quirk_to_packet(mesh_packet, &self.connections[identifier].quirks.input);
+                apply_quirk_to_packet(mesh_packet, &capsule.quirks.input);
                 let channel = if mesh_packet.channel == 0 {
                     None
                 } else {
@@ -139,6 +139,16 @@ impl Router {
                     .await;
             }
 
+            let connection_name = capsule.name.clone();
+            self.recv_set.spawn(async move {
+                capsule
+                    .connection
+                    .lock()
+                    .await
+                    .recv_mesh()
+                    .await
+                    .map(|r| (identifier, r))
+            });
             return Ok((connection_name, data));
         }
 
