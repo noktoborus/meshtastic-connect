@@ -38,7 +38,7 @@ impl Router {
                 }
             }
             let capsule = capsule.clone();
-            println!("{:?} send: {:?}", capsule.name, mesh_packet);
+            println!("> {:?} send: {:?}", capsule.name, mesh_packet);
             let mut mesh_packet = mesh_packet.clone();
             let channel = channel.clone();
 
@@ -132,7 +132,7 @@ impl Router {
 
             let connection_name = capsule.name.clone();
             if let connection::RecvData::MeshPacket(ref mut mesh_packet) = data {
-                println!("{:?} received: {:?}", connection_name, mesh_packet);
+                println!("> {:?} received: {:?}", connection_name, mesh_packet);
                 apply_quirk_to_packet(mesh_packet, &capsule.quirks.input);
                 let channel = if mesh_packet.channel == 0 {
                     None
