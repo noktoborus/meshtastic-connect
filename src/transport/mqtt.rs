@@ -117,7 +117,12 @@ impl MQTT {
             )),
             Some(ref mut connection) => {
                 let channel_name = channel_name.unwrap_or("PKI".into());
-                let topic = format!("{}/2/e/{}/{}", self.topic, channel_name, mesh_packet.from);
+                let topic = format!(
+                    "{}/2/e/{}/{}",
+                    self.topic,
+                    channel_name,
+                    NodeId::from(mesh_packet.from)
+                );
                 let service_envelope = meshtastic::ServiceEnvelope {
                     packet: Some(mesh_packet),
                     channel_id: channel_name,
