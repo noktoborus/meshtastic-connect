@@ -50,7 +50,7 @@ impl MQTT {
         mqttoptions.set_keep_alive(Duration::from_secs(10));
         mqttoptions.set_credentials(self.username.clone(), self.password.clone());
 
-        let topic = format!("{}/+/+", self.topic);
+        let topic = format!("{}/2/e/+/+", self.topic);
         let (client, event_loop) = AsyncClient::new(mqttoptions, 30);
         client
             .subscribe(topic, QoS::AtMostOnce)
@@ -117,7 +117,7 @@ impl MQTT {
             )),
             Some(ref mut connection) => {
                 let channel_name = channel_name.unwrap_or("PKI".into());
-                let topic = format!("{}/{}/{}", self.topic, channel_name, mesh_packet.from);
+                let topic = format!("{}/2/e/{}/{}", self.topic, channel_name, mesh_packet.from);
                 let service_envelope = meshtastic::ServiceEnvelope {
                     packet: Some(mesh_packet),
                     channel_id: channel_name,
