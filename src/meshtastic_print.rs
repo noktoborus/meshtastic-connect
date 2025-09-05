@@ -1,4 +1,5 @@
 use crate::keyring::cryptor::Decrypt;
+use crate::keyring::node_id::NodeId;
 use crate::{
     keyring::Keyring,
     meshtastic::{self, Data, MeshPacket, from_radio},
@@ -73,8 +74,8 @@ async fn print_decoded(data: Data) -> Result<(), String> {
 }
 
 pub async fn print_mesh_packet(mesh_packet: MeshPacket, channel_list: &Keyring) {
-    let from_formatted = mesh_packet.from.to_string();
-    let to_formatted = mesh_packet.to.to_string();
+    let from_formatted = NodeId::from(mesh_packet.from).to_string();
+    let to_formatted = NodeId::from(mesh_packet.to).to_string();
 
     println!(
         "- from={} to={} channel=0x{:0>2x} [id:{}]{} hop={{{}/{}}} want_ack={} (PKI ENC={})",
