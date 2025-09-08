@@ -72,10 +72,11 @@ impl Keyring {
         if let (Some(remote_peer), Some(local_peer)) = (self.peers.get(&from), self.peers.get(&to))
         {
             if let Some(private_key) = local_peer.private_key {
-                Some(Cryptor::PKI(
-                    format!("{} → {}", from, to),
-                    PKI::new(from, remote_peer.public_key, private_key),
-                ))
+                Some(Cryptor::PKI(PKI::new(
+                    from,
+                    remote_peer.public_key,
+                    private_key,
+                )))
             } else {
                 None
             }

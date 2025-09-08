@@ -145,21 +145,25 @@ impl Default for Udp {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-pub enum StreamAPIMethod {
-    // Send messages directly using ToRadio packet
-    // Raw packets is not supported: radio always replaces
-    // MeshPacket's header to self.
-    //
-    // Good choose to set SoftNode settings to radio's values.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub(crate) enum StreamMethod {
+    // Use topic from node settings if MQTT (and mqtt proxy) is enabled
+    // instead, send direct messages from node.
+    AUTO,
+
+    // Send messages from transport.
+    // In this case, headers from soft node are replaced by
+    // transport node's headers.
     Direct,
-    // Send messages using MQTT proxy messages.
-    // It is allows to send raw messages, but
-    // all packets got 'via_mqtt' flag.
-    //
-    // Possible to use any SoftNode settings.
-    #[default]
-    MQTTProxy,
+
+    // Use this topic, regardless of the node settings
+    FORCE(String),
+}
+
+impl Default for StreamMethod {
+    fn default() -> Self {
+        StreamMethod::FORCE("msh".into())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -167,14 +171,14 @@ pub(crate) struct SerialConfig {
     pub(crate) port: String,
     pub(crate) baudrate: u32,
     #[serde(default)]
-    pub(crate) stream_api_method: StreamAPIMethod,
+    pub(crate) method: StreamMethod,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct TCPConfig {
     pub(crate) address: SocketAddr,
     #[serde(default)]
-    pub(crate) stream_api_method: StreamAPIMethod,
+    pub(crate) method: StreamMethod,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]

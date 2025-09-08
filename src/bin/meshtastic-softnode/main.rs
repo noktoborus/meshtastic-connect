@@ -17,7 +17,6 @@ use meshtastic_connect::{
 use prost::Message;
 use publish::Publishable;
 use rand::Rng;
-use router::ConnectionName;
 use std::{
     process::{self, exit},
     time::Duration,
@@ -97,8 +96,7 @@ async fn handle_timer_event(
             .unwrap();
         router
             .send_mesh(Some(channel.name.clone()), mesh_packet)
-            .await
-            .unwrap();
+            .await;
 
         let interval = publish_descriptor.interval();
         if !interval.is_zero() {
@@ -110,26 +108,27 @@ async fn handle_timer_event(
 async fn handle_network_event(
     sqlite: &sqlite::SQLite,
     keyring: &Keyring,
-    connection_name: ConnectionName,
-    recv_data: connection::RecvData,
+    router: &mut router::Router,
+    recv_capsule: router::ReceiveCapsule,
 ) {
-    match recv_data {
-        connection::RecvData::MeshPacket(mesh_packet) => {
+    match &recv_capsule.incoming.data {
+        connection::DataVariant::MeshPacket(mesh_packet) => {
             if let Some(ref payload_variant) = mesh_packet.payload_variant {
                 match payload_variant {
                     mesh_packet::PayloadVariant::Decoded(data) => {
                         sqlite
                             .insert_packet(
-                                &connection_name,
+                                &recv_capsule.source_connection_name,
                                 &mesh_packet,
                                 None,
                                 Some(data.portnum()),
                                 Some(&data.encode_to_vec()),
                             )
                             .unwrap();
+                        // router: get channel name by mesh_packet.channel (number of channel)
                     }
                     mesh_packet::PayloadVariant::Encrypted(encrypted_data) => {
-                        if !match keyring.cryptor_for(
+                        if let Some((cryptor, data)) = match keyring.cryptor_for(
                             NodeId::from(mesh_packet.from),
                             NodeId::from(mesh_packet.to),
                             mesh_packet.channel,
@@ -141,55 +140,64 @@ async fn handle_network_event(
                                 {
                                     Ok(decrypted_data) => {
                                         match meshtastic::Data::decode(decrypted_data.as_slice()) {
-                                            Ok(data) => {
-                                                sqlite
-                                                    .insert_packet(
-                                                        &connection_name,
-                                                        &mesh_packet,
-                                                        Some(cryptor.to_string()),
-                                                        Some(data.portnum()),
-                                                        Some(&data.encode_to_vec()),
-                                                    )
-                                                    .unwrap();
-                                                true
-                                            }
+                                            Ok(data) => Some((cryptor, data)),
                                             Err(err) => {
                                                 println!("Failed to construct data: {}", err);
-                                                false
+                                                None
                                             }
                                         }
                                     }
                                     Err(err) => {
-                                        println!("Failed to decrypt data: {}", err);
-                                        false
+                                        println!("Failed to decrypt encrypted data: {}", err);
+                                        None
                                     }
                                 }
                             }
                             None => {
                                 println!("No cryptor found for packet: {:?}", mesh_packet);
-                                false
+                                None
                             }
                         } {
                             sqlite
                                 .insert_packet(
-                                    &connection_name,
+                                    &recv_capsule.source_connection_name,
+                                    &mesh_packet,
+                                    Some(cryptor.to_string()),
+                                    Some(data.portnum()),
+                                    Some(&data.encode_to_vec()),
+                                )
+                                .unwrap();
+                            router
+                                .route_next(Some(cryptor.to_string()), recv_capsule)
+                                .await;
+                        } else {
+                            sqlite
+                                .insert_packet(
+                                    &recv_capsule.source_connection_name,
                                     &mesh_packet,
                                     None,
                                     None,
                                     Some(encrypted_data),
                                 )
                                 .unwrap();
+                            router.route_next(None, recv_capsule).await;
                         };
                     }
                 }
             } else {
                 println!("No data received: {:?}", mesh_packet);
                 sqlite
-                    .insert_packet(&connection_name, &mesh_packet, None, None, None)
+                    .insert_packet(
+                        &recv_capsule.source_connection_name,
+                        &mesh_packet,
+                        None,
+                        None,
+                        None,
+                    )
                     .unwrap();
             }
         }
-        connection::RecvData::Unstructured(items) => {
+        connection::DataVariant::Unstructured(items) => {
             tokio::io::stderr().write_all(&items).await.unwrap()
         }
     }
@@ -251,7 +259,7 @@ async fn main() {
             },
             result = router.recv_mesh() => {
                 match result {
-                    Ok((name, recv_data)) => { handle_network_event(&sqlite, &keyring, name, recv_data).await; }
+                    Ok(recv_capsule) => { handle_network_event(&sqlite, &keyring, &mut router, recv_capsule).await; }
                     Err(err) => {
                         println!("handle error: {}", err);
                         exit(1);

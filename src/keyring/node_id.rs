@@ -12,6 +12,10 @@ impl NodeId {
     pub fn to_bytes(self) -> [u8; 4] {
         self.0.to_le_bytes()
     }
+
+    pub fn broadcast() -> Self {
+        NodeId(0xffffffff)
+    }
 }
 
 impl Default for NodeId {
@@ -90,8 +94,8 @@ impl fmt::Display for NodeId {
     }
 }
 
-impl Into<String> for NodeId {
-    fn into(self) -> String {
-        self.to_string()
+impl From<NodeId> for String {
+    fn from(value: NodeId) -> Self {
+        value.to_string()
     }
 }

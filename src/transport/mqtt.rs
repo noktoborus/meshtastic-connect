@@ -4,9 +4,10 @@ use rumqttc::{AsyncClient, EventLoop, MqttOptions, QoS};
 use std::{net::SocketAddr, time::Duration};
 
 // Root topic
-type Topic = String;
+pub type Topic = String;
 
-type ChannelId = String;
+// Channel identifier (name)
+pub type ChannelId = String;
 
 struct MQTTConnection {
     client: AsyncClient,
@@ -107,7 +108,7 @@ impl MQTT {
 
     pub async fn send(
         &mut self,
-        channel_name: Option<ChannelId>,
+        channel_id: ChannelId,
         mesh_packet: meshtastic::MeshPacket,
     ) -> Result<(), std::io::Error> {
         match self.connection {
@@ -116,11 +117,10 @@ impl MQTT {
                 "Not connected",
             )),
             Some(ref mut connection) => {
-                let channel_name = channel_name.unwrap_or("PKI".into());
-                let topic = format!("{}/2/e/{}/{}", self.topic, channel_name, self.gateway);
+                let topic = format!("{}/2/e/{}/{}", self.topic, channel_id, self.gateway);
                 let service_envelope = meshtastic::ServiceEnvelope {
                     packet: Some(mesh_packet),
-                    channel_id: channel_name,
+                    channel_id,
                     gateway_id: self.gateway.into(),
                 };
 
