@@ -2,6 +2,7 @@ use getifaddrs::{Interfaces, getifaddrs};
 use std::net::IpAddr;
 
 pub mod mqtt;
+pub mod mqtt_stream;
 pub mod stream;
 pub mod udp;
 

@@ -54,9 +54,11 @@ use crate::meshtastic;
 #[derive(Debug)]
 struct RadioCodec;
 
+pub type PacketId = u32;
+
 pub enum StreamData {
     // FromRadio structured data
-    FromRadio(meshtastic::FromRadio),
+    FromRadio(PacketId, meshtastic::from_radio::PayloadVariant),
     // Raw, journal or other unrecognized data
     Unstructured(BytesMut),
 }
@@ -91,7 +93,7 @@ impl Decoder for RadioCodec {
             Ok(result) => header = result,
             Err(e) => {
                 return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                    std::io::ErrorKind::InvalidData,
                     e.to_string(),
                 ));
             }
@@ -99,7 +101,7 @@ impl Decoder for RadioCodec {
 
         if header.magic != STREAM_HEADER_MAGIC {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+                std::io::ErrorKind::InvalidData,
                 format!(
                     "Invalid magic: {:#x?} (expected {:#x?})",
                     header.magic, STREAM_HEADER_MAGIC
@@ -110,7 +112,7 @@ impl Decoder for RadioCodec {
         let length = header.length.get();
         if length >= STREAM_PACKET_SIZE_MAX {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+                std::io::ErrorKind::InvalidData,
                 format!(
                     "Invalid packet length: {} (expected less {})",
                     length, STREAM_PACKET_SIZE_MAX
@@ -123,9 +125,18 @@ impl Decoder for RadioCodec {
         if src.len() >= frame_len {
             let pbuf = src.split_to(frame_len);
             match meshtastic::FromRadio::decode(&pbuf[HEADER_LEN..]) {
-                Ok(from_radio) => Ok(Some(StreamData::FromRadio(from_radio))),
+                Ok(from_radio) => {
+                    if let Some(payload_variant) = from_radio.payload_variant {
+                        Ok(Some(StreamData::FromRadio(from_radio.id, payload_variant)))
+                    } else {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("Radio send no payload: {:?}", from_radio),
+                        ))
+                    }
+                }
                 Err(e) => Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                    std::io::ErrorKind::InvalidData,
                     e.to_string(),
                 )),
             }
@@ -174,6 +185,7 @@ enum StreamCodec {
     Serial(Framed<SerialStream, RadioCodec>),
 }
 
+// Stream API
 #[derive(Debug)]
 pub struct Stream {
     pub address: StreamAddress,

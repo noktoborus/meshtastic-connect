@@ -308,13 +308,9 @@ async fn connect_to_stream(mut connection: Stream, keyring: &Keyring) {
         let stream_data = connection.recv().await.unwrap();
 
         match stream_data {
-            stream::StreamData::FromRadio(from_radio) => {
-                if let Some(payload_variant) = from_radio.payload_variant {
-                    println!("> message id: {:x}", from_radio.id);
-                    print_from_radio_payload(payload_variant, keyring).await;
-                } else {
-                    println!("> message id: {:x} no payload", from_radio.id);
-                }
+            stream::StreamData::FromRadio(packet_id, from_radio) => {
+                println!("> message id: {:x}", packet_id);
+                print_from_radio_payload(from_radio, keyring).await;
                 println!();
             }
             stream::StreamData::Unstructured(bytes) => {
