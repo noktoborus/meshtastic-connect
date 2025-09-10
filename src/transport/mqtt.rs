@@ -107,7 +107,7 @@ impl MQTT {
     }
 
     pub async fn send(
-        &mut self,
+        &self,
         channel_id: ChannelId,
         mesh_packet: meshtastic::MeshPacket,
     ) -> Result<(), std::io::Error> {
@@ -116,7 +116,7 @@ impl MQTT {
                 std::io::ErrorKind::NotConnected,
                 "Not connected",
             )),
-            Some(ref mut connection) => {
+            Some(ref connection) => {
                 let topic = format!("{}/2/e/{}/{}", self.topic, channel_id, self.gateway);
                 let service_envelope = meshtastic::ServiceEnvelope {
                     packet: Some(mesh_packet),

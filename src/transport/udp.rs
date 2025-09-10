@@ -115,13 +115,13 @@ impl UDP {
         Ok(())
     }
 
-    pub async fn recv(&mut self) -> Result<(meshtastic::MeshPacket, SocketAddr), std::io::Error> {
+    pub async fn recv(&self) -> Result<(meshtastic::MeshPacket, SocketAddr), std::io::Error> {
         match self.connection {
             None => Err(std::io::Error::new(
                 ErrorKind::NotConnected,
                 "Not joined to multicast",
             )),
-            Some(ref mut socket) => {
+            Some(ref socket) => {
                 static PACKET_BUFFER: usize = STREAM_PACKET_SIZE_MAX as usize * 2;
                 let mut buf = [0u8; PACKET_BUFFER];
 
@@ -133,13 +133,13 @@ impl UDP {
         }
     }
 
-    pub async fn send(&mut self, mesh_packet: MeshPacket) -> Result<(), std::io::Error> {
+    pub async fn send(&self, mesh_packet: MeshPacket) -> Result<(), std::io::Error> {
         match self.connection {
             None => Err(std::io::Error::new(
                 ErrorKind::NotConnected,
                 "Not joined to multicast",
             )),
-            Some(ref mut socket) => {
+            Some(ref socket) => {
                 let mut buf = BytesMut::new();
 
                 mesh_packet
