@@ -1,9 +1,9 @@
-use meshtastic_connect::transport::mqtt;
 use std::sync::Arc;
+
+use meshtastic_connect::transport::mqtt;
 use tokio::{sync::Mutex, task::JoinSet};
 
 pub type ConnectionName = String;
-type ArcConnectionCapsule = Arc<ConnectionCapsule>;
 type ConnectionId = usize;
 use crate::{
     config::{TransportQuirk, TransportQuirks},
@@ -15,14 +15,27 @@ impl Router {
         &mut self,
         connection_name: String,
         quirks: TransportQuirks,
-        connection: connection::Connection,
+        connection: (
+            connection::Sender,
+            connection::Receiver,
+            Option<connection::Heartbeat>,
+        ),
     ) {
-        self.connections.push(Arc::new(ConnectionCapsule {
-            id: self.connections.len(),
+        let (send, recv, interruptor) = connection;
+        let id = self.connections.len();
+
+        println!("Wait data for {} [{}]", connection_name, id);
+        self.connections.push(ConnectionCapsule {
+            id,
             name: connection_name,
             quirks,
-            connection: Mutex::new(connection),
-        }));
+            send: Arc::new(Mutex::new(send)),
+        });
+
+        set_wait_data(&mut self.recv_set, recv, id);
+        if let Some(interruptor) = interruptor {
+            set_wait_interrupt(&mut self.interrupt_set, interruptor, id);
+        }
     }
 
     // Send a mesh packet to all connections except the one specified by `from`
@@ -38,20 +51,14 @@ impl Router {
                     continue;
                 }
             }
-            let capsule = capsule.clone();
             println!("> {:?} send: {:?}", capsule.name, mesh_packet);
             let mut mesh_packet = mesh_packet.clone();
             let channel = channel.clone();
 
             apply_quirk_to_packet(&mut mesh_packet, &capsule.quirks.output);
-            tokio::spawn(async move {
-                capsule
-                    .connection
-                    .lock()
-                    .await
-                    .send_mesh(channel, mesh_packet)
-                    .await
-            });
+
+            let send = capsule.send.clone();
+            tokio::spawn(async move { send.lock().await.send((channel, mesh_packet)).await });
         }
     }
 }
@@ -60,7 +67,7 @@ struct ConnectionCapsule {
     id: ConnectionId,
     name: ConnectionName,
     quirks: TransportQuirks,
-    connection: Mutex<connection::Connection>,
+    send: Arc<Mutex<connection::Sender>>,
 }
 
 pub struct ReceiveCapsule {
@@ -69,48 +76,23 @@ pub struct ReceiveCapsule {
     pub incoming: connection::Incoming,
 }
 
-type RecvSet = JoinSet<Result<(ArcConnectionCapsule, connection::Incoming), std::io::Error>>;
+type RecvSet =
+    JoinSet<Result<(ConnectionId, connection::Incoming, connection::Receiver), std::io::Error>>;
+
+type InterruptSet = JoinSet<(ConnectionId, connection::Heartbeat)>;
 
 #[derive(Default)]
 pub struct Router {
-    connections: Vec<ArcConnectionCapsule>,
+    connections: Vec<ConnectionCapsule>,
+
+    // Receiving set
     recv_set: RecvSet,
+
+    // Interrupting set
+    interrupt_set: InterruptSet,
 }
 
 impl Router {
-    /// Connect all connections
-    pub async fn connect(&mut self) -> Result<(), std::io::Error> {
-        let mut set = JoinSet::new();
-
-        for capsule in &mut self.connections {
-            let capsule = capsule.clone();
-            set.spawn(async move { capsule.connection.lock().await.connect().await });
-        }
-
-        while let Some(res) = set.join_next().await {
-            match res.map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::Other, format!("thread panicked: {}", e))
-            })? {
-                Ok(_) => {}
-                Err(e) => return Err(e),
-            }
-        }
-
-        for capsule in self.connections.iter_mut() {
-            add_connection_to_set(&mut self.recv_set, &capsule);
-        }
-
-        Ok(())
-    }
-
-    /// Disconnect all connections
-    pub async fn disconnect(&mut self) {
-        for capsule in &mut self.connections {
-            let capsule = capsule.clone();
-            tokio::spawn(async move { capsule.connection.lock().await.disconnect().await });
-        }
-    }
-
     // Send to all connections
     pub async fn send_mesh(
         &mut self,
@@ -138,42 +120,103 @@ impl Router {
 
     // Try to receive from all connections and send to all, except received
     pub async fn recv_mesh(&mut self) -> Result<ReceiveCapsule, std::io::Error> {
-        while let Some(res) = self.recv_set.join_next().await {
-            let (capsule, mut incoming) = res.map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::Other, format!("thread panicked: {}", e))
-            })??;
-
-            if let connection::DataVariant::MeshPacket(ref mut mesh_packet) = incoming.data {
-                println!("> {:?} received: {:?}", capsule.name, mesh_packet);
-                apply_quirk_to_packet(mesh_packet, &capsule.quirks.input);
+        loop {
+            if self.interrupt_set.is_empty() {
+                if let Some(res) = self.recv_set.join_next().await {
+                    return self.process_join_recv(res).await;
+                } else {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("No connections available"),
+                    ));
+                }
+            } else {
+                tokio::select! {
+                    Some(res) = self.interrupt_set.join_next() => {
+                        self.process_join_interrupt(res).await?
+                    }
+                    res = self.recv_set.join_next()  => {
+                        if let Some(res) = res {
+                        return self.process_join_recv(res).await;
+                        }
+                        else {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                format!("No connections available"),
+                            ));
+                        }
+                    }
+                }
             }
+        }
+    }
 
-            add_connection_to_set(&mut self.recv_set, &capsule);
+    async fn process_join_interrupt(
+        &mut self,
+        res: Result<(ConnectionId, connection::Heartbeat), tokio::task::JoinError>,
+    ) -> Result<(), std::io::Error> {
+        let res = res.map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("interrupt join error: {}", e),
+            )
+        })?;
 
-            return Ok(ReceiveCapsule {
-                source_connection_name: capsule.name.clone(),
-                source_connection_id: capsule.id,
-                incoming,
-            });
+        let (capsule_id, interruptor) = res;
+        let mut sender = self.connections[capsule_id].send.lock().await;
+
+        interruptor.send(&mut sender).await?;
+
+        set_wait_interrupt(&mut self.interrupt_set, interruptor, capsule_id);
+        Ok(())
+    }
+
+    async fn process_join_recv(
+        &mut self,
+        res: Result<
+            Result<(ConnectionId, connection::Incoming, connection::Receiver), std::io::Error>,
+            tokio::task::JoinError,
+        >,
+    ) -> Result<ReceiveCapsule, std::io::Error> {
+        let res = res.map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("receiving join error: {}", e),
+            )
+        })?;
+
+        let (capsule_id, mut incoming, recv) = res?;
+        let capsule = &self.connections[capsule_id];
+
+        if let connection::DataVariant::MeshPacket(ref mut mesh_packet) = incoming.data {
+            println!("> {:?} received: {:?}", capsule.name, mesh_packet);
+            apply_quirk_to_packet(mesh_packet, &capsule.quirks.input);
         }
 
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("No connections available"),
-        ))
+        set_wait_data(&mut self.recv_set, recv, capsule_id);
+
+        return Ok(ReceiveCapsule {
+            source_connection_name: capsule.name.clone(),
+            source_connection_id: capsule.id,
+            incoming,
+        });
     }
 }
 
-fn add_connection_to_set(recv_set: &mut RecvSet, capsule: &ArcConnectionCapsule) {
-    let capsule = capsule.clone();
-    recv_set.spawn(async move {
-        capsule
-            .connection
-            .lock()
-            .await
-            .recv_mesh()
-            .await
-            .map(|r| (capsule.clone(), r))
+fn set_wait_data(recv_set: &mut RecvSet, mut recv: connection::Receiver, id: ConnectionId) {
+    println!("spawn reader for id [{}]", id);
+    recv_set.spawn(async move { recv.next().await.map(|r| (id, r, recv)) });
+}
+
+fn set_wait_interrupt(
+    interrupt_set: &mut InterruptSet,
+    mut interrupt: connection::Heartbeat,
+    id: ConnectionId,
+) {
+    println!("spawn interruptor for id [{}]", id);
+    interrupt_set.spawn(async move {
+        interrupt.next().await;
+        (id, interrupt)
     });
 }
 
@@ -183,7 +226,11 @@ fn apply_quirk_to_packet(
 ) {
     for quirk in quirks {
         match quirk {
-            TransportQuirk::IncrementHopLimit => mesh_packet.hop_limit += 1,
+            TransportQuirk::IncrementHopLimit => {
+                if mesh_packet.hop_limit < 7 {
+                    mesh_packet.hop_limit += 1
+                }
+            }
             TransportQuirk::SetViaMQTT => mesh_packet.via_mqtt = true,
             TransportQuirk::UnsetViaMQTT => mesh_packet.via_mqtt = false,
         }

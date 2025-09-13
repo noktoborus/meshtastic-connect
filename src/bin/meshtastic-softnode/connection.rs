@@ -1,21 +1,28 @@
 use crate::{SoftNodeConfig, config};
-use meshtastic_connect::{
-    keyring::node_id::NodeId,
-    meshtastic::{self, ServiceEnvelope},
-    transport::{if_index_by_addr, mqtt, mqtt_stream, stream, udp},
+use futures::{
+    SinkExt, StreamExt,
+    stream::{SplitSink, SplitStream},
 };
-use prost::Message;
-use std::time::Duration;
+use meshtastic_connect::{
+    meshtastic::{self, to_radio},
+    transport::{
+        if_index_by_addr, mqtt, mqtt_stream,
+        stream::{self, codec::BytesSequence},
+        udp,
+    },
+};
+use std::process::exit;
 
-pub struct StreamConnection {
-    method: config::StreamMethod,
-    stream: mqtt_stream::MQTTStream,
+pub enum Sender {
+    UDP(SplitSink<udp::Udp, meshtastic::MeshPacket>),
+    Stream(SplitSink<mqtt_stream::MqttStream, mqtt_stream::MqttStreamSendData>),
+    MQTT(mqtt::MqttSender),
 }
 
-pub enum Connection {
-    UDP(udp::UDP),
-    Stream(StreamConnection),
-    MQTT(mqtt::MQTT),
+pub enum Receiver {
+    UDP(SplitStream<udp::Udp>),
+    Stream(SplitStream<mqtt_stream::MqttStream>),
+    MQTT(mqtt::MqttReceiver),
 }
 
 pub enum DataVariant {
@@ -28,46 +35,32 @@ pub struct Incoming {
     pub data: DataVariant,
 }
 
-impl Connection {
-    pub async fn connect(&mut self) -> Result<(), std::io::Error> {
-        match self {
-            Connection::UDP(multicast) => multicast.connect().await,
-            Connection::Stream(stream) => stream.stream.stream().connect().await,
-            Connection::MQTT(mqtt) => mqtt.connect().await,
-        }
-    }
+type SendData = (Option<mqtt::ChannelId>, meshtastic::MeshPacket);
 
-    pub async fn disconnect(&mut self) {
+impl Sender {
+    pub async fn send(&mut self, send_data: SendData) -> Result<(), std::io::Error> {
+        let (channel_id, mesh_packet) = send_data;
         match self {
-            Connection::UDP(multicast) => multicast.disconnect().await,
-            Connection::Stream(stream) => stream.stream.stream().disconnect().await,
-            Connection::MQTT(mqtt) => mqtt.disconnect().await,
-        }
-    }
-
-    pub async fn send_mesh(
-        &mut self,
-        channel_id: Option<mqtt::ChannelId>,
-        mesh_packet: meshtastic::MeshPacket,
-    ) -> Result<(), std::io::Error> {
-        match self {
-            Connection::UDP(multicast) => {
+            Sender::UDP(udp) => {
                 println!("UDP: Sending...");
-                multicast.send(mesh_packet).await
+                udp.send(mesh_packet).await
             }
-            Connection::Stream(stream) => {
+            Sender::Stream(stream) => {
                 if let Some(channel_id) = channel_id {
                     println!("STREAM MQTT: Sending to {}...", channel_id);
-                    stream.stream.send(channel_id, mesh_packet).await
+                    stream.start_send_unpin(mqtt_stream::MqttStreamSendData::MeshPacket(
+                        channel_id,
+                        mesh_packet,
+                    ))
                 } else {
                     println!("STREAM MQTT SKIP: No channel ID provided");
                     Ok(())
                 }
             }
-            Connection::MQTT(mqtt) => {
+            Sender::MQTT(mqtt) => {
                 if let Some(channel_id) = channel_id {
                     println!("MQTT: Sending to {}...", channel_id);
-                    mqtt.send(channel_id, mesh_packet).await
+                    mqtt.send((channel_id, mesh_packet)).await
                 } else {
                     println!("MQTT SKIP: No channel ID provided");
                     Ok(())
@@ -75,77 +68,117 @@ impl Connection {
             }
         }
     }
+}
 
-    pub async fn recv_mesh(&mut self) -> Result<Incoming, std::io::Error> {
+async fn udp_next(udp: &mut SplitStream<udp::Udp>) -> Result<Incoming, std::io::Error> {
+    let (mesh_packet, _) = udp.next().await.ok_or(std::io::Error::new(
+        std::io::ErrorKind::NotConnected,
+        "UDP connection lost",
+    ))??;
+
+    Ok(Incoming {
+        channel_id: None,
+        data: DataVariant::MeshPacket(mesh_packet),
+    })
+}
+
+async fn stream_next(
+    stream_connection: &mut SplitStream<mqtt_stream::MqttStream>,
+) -> Result<Incoming, std::io::Error> {
+    let recv_data = stream_connection.next().await.ok_or(std::io::Error::new(
+        std::io::ErrorKind::NotConnected,
+        "Stream connection lost",
+    ))??;
+
+    let incoming = match recv_data {
+        mqtt_stream::MqttStreamRecvData::MeshPacket(packet_id, mesh_packet) => {
+            let message = format!(
+                "\nStreamAPI: Receive transport's MeshPacket: [{}] {:?}\n",
+                packet_id, mesh_packet
+            );
+
+            Incoming {
+                channel_id: None,
+                data: DataVariant::Unstructured(message.into()),
+            }
+        }
+        mqtt_stream::MqttStreamRecvData::MQTTMeshPacket(
+            _packet_id,
+            mesh_packet,
+            channel_id,
+            _gateway_id,
+        ) => Incoming {
+            channel_id: Some(channel_id),
+            data: DataVariant::MeshPacket(mesh_packet),
+        },
+        mqtt_stream::MqttStreamRecvData::FromRadio(_, from_radio) => {
+            let message = format!(
+                "\nStreamAPI: Receive transport's radio packet: {:?}\n",
+                from_radio
+            );
+
+            Incoming {
+                channel_id: None,
+                data: DataVariant::Unstructured(message.into()),
+            }
+        }
+
+        mqtt_stream::MqttStreamRecvData::Unstructured(bytes_mut) => Incoming {
+            channel_id: None,
+            data: DataVariant::Unstructured(bytes_mut.to_vec()),
+        },
+    };
+    Ok(incoming)
+}
+
+async fn mqtt_next(mqtt: &mut mqtt::MqttReceiver) -> Result<Incoming, std::io::Error> {
+    let (mesh_packet, channel_id, _) = mqtt.next().await?;
+
+    Ok(Incoming {
+        channel_id: Some(channel_id),
+        data: DataVariant::MeshPacket(mesh_packet),
+    })
+}
+
+impl Receiver {
+    pub async fn next(&mut self) -> Result<Incoming, std::io::Error> {
         match self {
-            Connection::UDP(multicast) => {
-                let (mesh_packet, _) = multicast.recv().await?;
-                Ok(Incoming {
-                    channel_id: None,
-                    data: DataVariant::MeshPacket(mesh_packet),
-                })
-            }
-            Connection::Stream(stream) => match stream.stream.recv().await? {
-                mqtt_stream::MQTTStreamData::MeshPacket(_packet_id, _mesh_packet) => Ok(Incoming {
-                    channel_id: None,
-                    data: DataVariant::Unstructured(
-                        format!(
-                            "StreamAPI({:?}): Receive transport's mesh packet",
-                            stream.method
-                        )
-                        .into(),
-                    ),
-                }),
-                mqtt_stream::MQTTStreamData::MQTTMeshPacket(
-                    _packet_id,
-                    mesh_packet,
-                    channel_id,
-                    _gateway_id,
-                ) => Ok(Incoming {
-                    channel_id: Some(channel_id),
-                    data: DataVariant::MeshPacket(mesh_packet),
-                }),
-                mqtt_stream::MQTTStreamData::FromRadio(_, _) => Ok(Incoming {
-                    channel_id: None,
-                    data: DataVariant::Unstructured(
-                        format!(
-                            "StreamAPI({:?}): Receive transport's radio packet",
-                            stream.method
-                        )
-                        .into(),
-                    ),
-                }),
-                mqtt_stream::MQTTStreamData::Unstructured(bytes_mut) => Ok(Incoming {
-                    channel_id: None,
-                    data: DataVariant::Unstructured(bytes_mut.to_vec()),
-                }),
-            },
-            Connection::MQTT(mqtt) => {
-                let (mesh_packet_or_not, channel_id, node_id) = mqtt.recv().await?;
-
-                if let Some(mesh_packet) = mesh_packet_or_not {
-                    Ok(Incoming {
-                        channel_id: Some(channel_id),
-                        data: DataVariant::MeshPacket(mesh_packet),
-                    })
-                } else {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!(
-                            "No MeshPacket from mqtt channel {:?} (node_id: {:?})",
-                            channel_id, node_id
-                        ),
-                    ))
-                }
-            }
+            Receiver::UDP(udp) => udp_next(udp).await,
+            Receiver::Stream(stream_connection) => stream_next(stream_connection).await,
+            Receiver::MQTT(mqtt) => mqtt_next(mqtt).await,
         }
     }
 }
 
-pub fn build(
+pub struct Heartbeat {
+    interval: tokio::time::Interval,
+}
+
+impl Heartbeat {
+    pub async fn next(&mut self) {
+        let _ = self.interval.tick().await;
+    }
+
+    pub async fn send(&self, sender: &mut Sender) -> Result<(), std::io::Error> {
+        if let Sender::Stream(split_sink) = sender {
+            split_sink
+                .send(mqtt_stream::MqttStreamSendData::ToRadio(
+                    to_radio::PayloadVariant::Heartbeat(meshtastic::Heartbeat {}),
+                ))
+                .await
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Heartbeat can only be sent over a `Stream` sender",
+            ))
+        }
+    }
+}
+
+pub async fn build(
     transport_config: config::SoftNodeTransport,
     soft_node: &SoftNodeConfig,
-) -> Connection {
+) -> (Sender, Receiver, Option<Heartbeat>) {
     match transport_config.variant {
         config::SoftNodeVariant::UDP(udp) => {
             let multicast_description = if let Some(multicast) = udp.join_multicast {
@@ -169,29 +202,54 @@ pub fn build(
                 None
             };
 
-            let udp = udp::UDP::new(
+            let udp = udp::UdpBuilder::new(
                 udp.bind_address.into(),
                 udp.remote_address.into(),
                 multicast_description,
             );
+            let udp = udp.connect().await.unwrap();
+            let (sender, receiver) = udp.split();
 
-            Connection::UDP(udp)
+            (Sender::UDP(sender), Receiver::UDP(receiver), None)
         }
         config::SoftNodeVariant::TCP(ref tcp_config) => {
             println!("Connect TCP to {}", tcp_config.address);
 
-            let connection = stream::Stream::new(
-                stream::StreamAddress::TCPSocket(tcp_config.address),
-                Duration::from_secs(10),
-            );
+            let mut connection = stream::tcp::TcpBuilder::new(tcp_config.address)
+                .connect()
+                .await
+                .inspect_err(|e| {
+                    println!("TCP connect failed: {e}");
+                    exit(1);
+                })
+                .unwrap();
+
+            connection.send(BytesSequence::Wakeup).await.unwrap();
+            connection
+                .send(to_radio::PayloadVariant::WantConfigId(0))
+                .await
+                .unwrap();
 
             let connection =
                 build_mqtt_stream_for_method(soft_node, connection, &tcp_config.method);
 
-            Connection::Stream(StreamConnection {
-                method: tcp_config.method.clone(),
-                stream: connection,
-            })
+            let (sender, receiver) = connection.split();
+            let heartbeat = if tcp_config.heartbeat_interval.is_zero() {
+                None
+            } else {
+                Some(Heartbeat {
+                    interval: tokio::time::interval_at(
+                        tokio::time::Instant::now() + tcp_config.heartbeat_interval.into(),
+                        tcp_config.heartbeat_interval.into(),
+                    ),
+                })
+            };
+
+            (
+                Sender::Stream(sender),
+                Receiver::Stream(receiver),
+                heartbeat,
+            )
         }
         config::SoftNodeVariant::SERIAL(ref serial_config) => {
             println!(
@@ -199,21 +257,40 @@ pub fn build(
                 serial_config.port, serial_config.baudrate
             );
 
-            let serial = stream::Serial {
-                tty: serial_config.port.clone(),
-                baudrate: serial_config.baudrate,
-            };
-            let connection = stream::Stream::new(
-                stream::StreamAddress::Serial(serial),
-                Duration::from_secs(10),
-            );
+            let mut connection = stream::serial::SerialBuilder::new(
+                serial_config.port.clone(),
+                serial_config.baudrate,
+            )
+            .connect()
+            .await
+            .unwrap();
+
+            connection.send(BytesSequence::Wakeup).await.unwrap();
+            connection
+                .send(to_radio::PayloadVariant::WantConfigId(0))
+                .await
+                .unwrap();
+
             let connection =
                 build_mqtt_stream_for_method(soft_node, connection, &serial_config.method);
 
-            Connection::Stream(StreamConnection {
-                method: serial_config.method.clone(),
-                stream: connection,
-            })
+            let (sender, receiver) = connection.split();
+            let heartbeat = if serial_config.heartbeat_interval.is_zero() {
+                None
+            } else {
+                Some(Heartbeat {
+                    interval: tokio::time::interval_at(
+                        tokio::time::Instant::now() + serial_config.heartbeat_interval.into(),
+                        serial_config.heartbeat_interval.into(),
+                    ),
+                })
+            };
+
+            (
+                Sender::Stream(sender),
+                Receiver::Stream(receiver),
+                heartbeat,
+            )
         }
         config::SoftNodeVariant::MQTT(mqttconfig) => {
             println!(
@@ -221,7 +298,7 @@ pub fn build(
                 mqttconfig.username, mqttconfig.server, mqttconfig.topic
             );
 
-            let mqtt = mqtt::MQTT::new(
+            let mqtt = mqtt::MqttBuilder::new(
                 mqttconfig.server,
                 mqttconfig.username.clone(),
                 mqttconfig.password.clone(),
@@ -229,7 +306,17 @@ pub fn build(
                 mqttconfig.topic.clone(),
             );
 
-            Connection::MQTT(mqtt)
+            let connection = mqtt
+                .connect()
+                .await
+                .inspect_err(|e| {
+                    println!("MQTT connect failed: {e}");
+                    exit(1);
+                })
+                .unwrap();
+            let (sender, receiver) = connection.split();
+
+            (Sender::MQTT(sender), Receiver::MQTT(receiver), None)
         }
     }
 }
@@ -238,12 +325,12 @@ fn build_mqtt_stream_for_method(
     soft_node: &SoftNodeConfig,
     stream: stream::Stream,
     method: &config::StreamMethod,
-) -> mqtt_stream::MQTTStream {
+) -> mqtt_stream::MqttStream {
     match method {
         config::StreamMethod::AUTO => todo!(),
         config::StreamMethod::Direct => todo!(),
         config::StreamMethod::FORCE(topic) => {
-            mqtt_stream::MQTTStream::new(stream, soft_node.node_id, topic.clone())
+            mqtt_stream::MqttStream::new(stream, soft_node.node_id, topic.clone())
         }
     }
 }

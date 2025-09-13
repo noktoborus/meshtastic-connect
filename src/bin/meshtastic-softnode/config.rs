@@ -1,5 +1,6 @@
+use duration_string::DurationString;
 use serde::{
-    Deserialize, Deserializer, Serialize,
+    Deserialize, Deserializer, Serialize, Serializer,
     de::{self, DeserializeOwned},
 };
 use serde_yaml_ng::{from_reader, to_writer};
@@ -145,7 +146,7 @@ impl Default for Udp {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) enum StreamMethod {
     // Use topic from node settings if MQTT (and mqtt proxy) is enabled
     // instead, send direct messages from node.
@@ -160,6 +161,36 @@ pub(crate) enum StreamMethod {
     FORCE(String),
 }
 
+impl Serialize for StreamMethod {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let value = match self {
+            StreamMethod::AUTO => "auto".into(),
+            StreamMethod::Direct => "direct".into(),
+            StreamMethod::FORCE(topic) => format!("force:{}", topic),
+        };
+        serializer.serialize_str(&value)
+    }
+}
+
+impl<'de> Deserialize<'de> for StreamMethod {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let value = match s.as_str() {
+            "auto" => StreamMethod::AUTO,
+            "direct" => StreamMethod::Direct,
+            s if s.starts_with("force:") => StreamMethod::FORCE(s[6..].into()),
+            _ => return Err(de::Error::custom("invalid stream method")),
+        };
+        Ok(value)
+    }
+}
+
 impl Default for StreamMethod {
     fn default() -> Self {
         StreamMethod::FORCE("msh".into())
@@ -171,12 +202,16 @@ pub(crate) struct SerialConfig {
     pub(crate) port: String,
     pub(crate) baudrate: u32,
     #[serde(default)]
+    pub(crate) heartbeat_interval: DurationString,
+    #[serde(default)]
     pub(crate) method: StreamMethod,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct TCPConfig {
     pub(crate) address: SocketAddr,
+    #[serde(default)]
+    pub(crate) heartbeat_interval: DurationString,
     #[serde(default)]
     pub(crate) method: StreamMethod,
 }

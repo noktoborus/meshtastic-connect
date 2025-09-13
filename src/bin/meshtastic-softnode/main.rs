@@ -180,7 +180,12 @@ async fn handle_network_event(
                                     Some(encrypted_data),
                                 )
                                 .unwrap();
-                            router.route_next(None, recv_capsule).await;
+                            let channel = if mesh_packet.pki_encrypted {
+                                Some("PKI".into())
+                            } else {
+                                None
+                            };
+                            router.route_next(channel, recv_capsule).await;
                         };
                     }
                 }
@@ -242,11 +247,9 @@ async fn main() {
         router.add_connection(
             transport.name.clone(),
             transport.quirks.clone(),
-            connection::build(transport.clone(), &soft_node),
+            connection::build(transport.clone(), &soft_node).await,
         );
     }
-
-    router.connect().await.unwrap();
 
     loop {
         let next_wakeup = schedule.next_wakeup().unwrap_or_else(|| {

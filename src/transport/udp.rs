@@ -2,14 +2,16 @@ use std::{
     fmt,
     io::ErrorKind,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    pin::Pin,
+    task::{Context, Poll},
 };
 
-use bytes::BytesMut;
+use crate::meshtastic;
 use prost::Message;
 use socket2::SockRef;
-use tokio::net::UdpSocket;
-const STREAM_PACKET_SIZE_MAX: u16 = 512;
-use crate::meshtastic::{self, MeshPacket};
+use tokio::{io::ReadBuf, net::UdpSocket};
+
+const UDP_PACKET_SIZE_MAX: u16 = 512;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Interface {
@@ -33,14 +35,13 @@ impl Interface {
 }
 
 #[derive(Debug)]
-pub struct UDP {
+pub struct UdpBuilder {
     pub bind_address: SocketAddr,
     pub remote_address: SocketAddr,
     pub join_multicast: Option<Multicast>,
-    connection: Option<UdpSocket>,
 }
 
-impl fmt::Display for UDP {
+impl fmt::Display for UdpBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(join_multicast) = self.join_multicast {
             write!(
@@ -57,7 +58,12 @@ impl fmt::Display for UDP {
     }
 }
 
-impl UDP {
+pub struct Udp {
+    socket: UdpSocket,
+    remote_address: SocketAddr,
+}
+
+impl UdpBuilder {
     pub fn new(
         bind_address: SocketAddr,
         remote_address: SocketAddr,
@@ -67,11 +73,10 @@ impl UDP {
             bind_address,
             remote_address,
             join_multicast,
-            connection: None,
         }
     }
 
-    pub async fn connect(&mut self) -> Result<(), std::io::Error> {
+    pub async fn connect(&self) -> Result<Udp, std::io::Error> {
         let socket = UdpSocket::bind(&[self.bind_address][..]).await?;
         let sock_ref = SockRef::from(&socket);
         sock_ref.set_reuse_address(true)?;
@@ -111,49 +116,56 @@ impl UDP {
         }
 
         drop(sock_ref);
-        self.connection = Some(socket);
+
+        Ok(Udp {
+            socket,
+            remote_address: self.remote_address,
+        })
+    }
+}
+
+impl futures::Sink<meshtastic::MeshPacket> for Udp {
+    type Error = std::io::Error;
+
+    fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn start_send(
+        self: Pin<&mut Self>,
+        mesh_packet: meshtastic::MeshPacket,
+    ) -> Result<(), Self::Error> {
+        // this.socket.try_send_to(&mesh_packet, this.target)?;
+        let buf = mesh_packet.encode_to_vec();
+        let remote = self.remote_address;
+        self.socket.try_send_to(&buf, remote)?;
         Ok(())
     }
 
-    pub async fn recv(&self) -> Result<(meshtastic::MeshPacket, SocketAddr), std::io::Error> {
-        match self.connection {
-            None => Err(std::io::Error::new(
-                ErrorKind::NotConnected,
-                "Not joined to multicast",
-            )),
-            Some(ref socket) => {
-                static PACKET_BUFFER: usize = STREAM_PACKET_SIZE_MAX as usize * 2;
-                let mut buf = [0u8; PACKET_BUFFER];
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
 
-                let (size, addr) = socket.recv_from(&mut buf).await?;
-                let mesh_packet = meshtastic::MeshPacket::decode(&buf[0..size])
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl futures::Stream for Udp {
+    type Item = Result<(meshtastic::MeshPacket, SocketAddr), std::io::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        static PACKET_BUFFER: usize = UDP_PACKET_SIZE_MAX as usize * 2;
+        let mut u8buf = [0u8; PACKET_BUFFER];
+        let mut buf = ReadBuf::new(&mut u8buf);
+
+        match self.socket.poll_recv_from(cx, &mut buf)? {
+            Poll::Ready(addr) => {
+                let mesh_packet = meshtastic::MeshPacket::decode(buf.filled())
                     .map_err(|e| std::io::Error::new(ErrorKind::InvalidData, e.to_string()))?;
-                Ok((mesh_packet, addr))
+                Poll::Ready(Some(Ok((mesh_packet, addr))))
             }
-        }
-    }
-
-    pub async fn send(&self, mesh_packet: MeshPacket) -> Result<(), std::io::Error> {
-        match self.connection {
-            None => Err(std::io::Error::new(
-                ErrorKind::NotConnected,
-                "Not joined to multicast",
-            )),
-            Some(ref socket) => {
-                let mut buf = BytesMut::new();
-
-                mesh_packet
-                    .encode(&mut buf)
-                    .map_err(|e| std::io::Error::new(ErrorKind::InvalidInput, e.to_string()))?;
-                socket.send_to(&buf, self.remote_address).await?;
-                Ok(())
-            }
-        }
-    }
-
-    pub async fn disconnect(&mut self) {
-        if let Some(connection) = self.connection.take() {
-            drop(connection);
+            Poll::Pending => Poll::Pending,
         }
     }
 }

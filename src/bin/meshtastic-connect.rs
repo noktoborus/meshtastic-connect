@@ -1,13 +1,16 @@
 use meshtastic_connect::keyring;
 
 use clap::Parser;
+use futures::{SinkExt, StreamExt};
+use meshtastic_connect::meshtastic::Heartbeat;
+use meshtastic_connect::meshtastic::to_radio::PayloadVariant;
 use meshtastic_connect::meshtastic_print::{
     print_from_radio_payload, print_mesh_packet, print_service_envelope,
 };
+use meshtastic_connect::transport::stream::Stream;
 use meshtastic_connect::transport::udp::{Interface, Multicast};
 use meshtastic_connect::transport::{
-    stream::{self, Serial, Stream, StreamAddress},
-    udp::UDP,
+    stream, stream::serial::SerialBuilder, stream::tcp::TcpBuilder, udp::UdpBuilder,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_yaml_ng::from_reader;
@@ -20,9 +23,11 @@ use keyring::{
 };
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use std::net::{Ipv4Addr, SocketAddrV4};
+use std::process::exit;
 use std::time::Duration;
 use std::{fs::File, io::BufReader, net::SocketAddr};
 use tokio::io::AsyncWriteExt;
+use tokio::time::Instant;
 
 #[derive(clap::Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -253,12 +258,14 @@ async fn main() {
         Mode::TCP(tcp) => {
             println!("Connect to TCP {}", tcp.connect_to);
 
-            let connection = Stream::new(
-                StreamAddress::TCPSocket(tcp.connect_to),
-                Duration::from_secs(tcp.heartbeat_seconds),
-            );
+            let connection = TcpBuilder::new(tcp.connect_to).connect().await.unwrap();
 
-            connect_to_stream(connection, &keyring).await;
+            connect_to_stream(
+                connection,
+                Duration::from_secs(tcp.heartbeat_seconds),
+                &keyring,
+            )
+            .await;
         }
         Mode::Serial(serial) => {
             println!(
@@ -266,19 +273,21 @@ async fn main() {
                 serial.tty, serial.baudrate
             );
 
-            let connection = Stream::new(
-                StreamAddress::Serial(Serial {
-                    tty: serial.tty,
-                    baudrate: serial.baudrate,
-                }),
-                Duration::from_secs(serial.heartbeat_seconds),
-            );
+            let connection = SerialBuilder::new(serial.tty, serial.baudrate)
+                .connect()
+                .await
+                .unwrap();
 
-            connect_to_stream(connection, &keyring).await;
+            connect_to_stream(
+                connection,
+                Duration::from_secs(serial.heartbeat_seconds),
+                &keyring,
+            )
+            .await;
         }
         Mode::Multicast(multicast) => {
             println!("Listen multicast on {}", multicast.listen_address);
-            let mut connection = UDP::new(
+            let connection = UdpBuilder::new(
                 SocketAddr::V4(SocketAddrV4::new(
                     Ipv4Addr::UNSPECIFIED,
                     multicast.listen_address.port(),
@@ -290,31 +299,56 @@ async fn main() {
                 }),
             );
 
-            connection.connect().await.unwrap();
+            let mut connection = connection.connect().await.unwrap();
             loop {
-                let (mesh_packet, _) = connection.recv().await.unwrap();
-
-                print_mesh_packet(mesh_packet, &keyring).await;
-
+                match connection.next().await {
+                    Some(result) => {
+                        let (mesh_packet, _) = result.unwrap();
+                        print_mesh_packet(mesh_packet, &keyring).await;
+                    }
+                    None => {
+                        println!("Connection closed");
+                        break;
+                    }
+                };
                 println!();
             }
         }
     }
 }
 
-async fn connect_to_stream(mut connection: Stream, keyring: &Keyring) {
-    connection.connect().await.unwrap();
-    loop {
-        let stream_data = connection.recv().await.unwrap();
+async fn connect_to_stream(
+    mut connection: Stream,
+    heartbeat_interval: Duration,
+    keyring: &Keyring,
+) -> ! {
+    let _ = connection.send(PayloadVariant::WantConfigId(0)).await;
+    let mut hb_interval =
+        tokio::time::interval_at(Instant::now() + heartbeat_interval, heartbeat_interval);
 
-        match stream_data {
-            stream::StreamData::FromRadio(packet_id, from_radio) => {
-                println!("> message id: {:x}", packet_id);
-                print_from_radio_payload(from_radio, keyring).await;
-                println!();
-            }
-            stream::StreamData::Unstructured(bytes) => {
-                tokio::io::stderr().write_all(&bytes).await.unwrap();
+    loop {
+        tokio::select! {
+            _ = hb_interval.tick() => {
+                    connection.send(PayloadVariant::Heartbeat(Heartbeat{})).await.unwrap();
+                }
+            stream_data = connection.next() => {
+                match  stream_data {
+                    // TODO: heartbeat
+                    Some(stream_data) => match stream_data.unwrap() {
+                        stream::StreamRecvData::FromRadio(packet_id, from_radio) => {
+                            println!("> message id: {:x}", packet_id);
+                            print_from_radio_payload(from_radio, keyring).await;
+                            println!();
+                        }
+                        stream::StreamRecvData::Unstructured(bytes) => {
+                            tokio::io::stderr().write_all(&bytes).await.unwrap();
+                        }
+                    },
+                    None => {
+                        println!("Connection closed");
+                        exit(0);
+                    }
+                }
             }
         }
     }
