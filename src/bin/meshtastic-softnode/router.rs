@@ -204,7 +204,6 @@ impl Router {
 }
 
 fn set_wait_data(recv_set: &mut RecvSet, mut recv: connection::Receiver, id: ConnectionId) {
-    println!("spawn reader for id [{}]", id);
     recv_set.spawn(async move { recv.next().await.map(|r| (id, r, recv)) });
 }
 
@@ -213,7 +212,6 @@ fn set_wait_interrupt(
     mut interrupt: connection::Heartbeat,
     id: ConnectionId,
 ) {
-    println!("spawn interruptor for id [{}]", id);
     interrupt_set.spawn(async move {
         interrupt.next().await;
         (id, interrupt)
