@@ -48,10 +48,10 @@ impl Sender {
             Sender::Stream(stream) => {
                 if let Some(channel_id) = channel_id {
                     println!("STREAM MQTT: Sending to {}...", channel_id);
-                    stream.start_send_unpin(mqtt_stream::MqttStreamSendData::MeshPacket(
+                    stream.send(mqtt_stream::MqttStreamSendData::MeshPacket(
                         channel_id,
                         mesh_packet,
-                    ))
+                    )).await
                 } else {
                     println!("STREAM MQTT SKIP: No channel ID provided");
                     Ok(())
