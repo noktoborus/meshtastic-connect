@@ -236,6 +236,9 @@ pub(crate) enum TransportQuirk {
     SetViaMQTT,
     // Set 'via_mqtt' flag to false in MeshPacket.
     UnsetViaMQTT,
+    // if hop_start == 0Set hop_start to 7 if hop_limit is 7:
+    // suitable if near node sent hop_start=0
+    FixupHopStartIf0,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]

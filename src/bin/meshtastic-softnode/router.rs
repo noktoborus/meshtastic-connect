@@ -222,15 +222,21 @@ fn apply_quirk_to_packet(
     mesh_packet: &mut meshtastic_connect::meshtastic::MeshPacket,
     quirks: &Vec<TransportQuirk>,
 ) {
+    const HOP_LIMIT_MAX: u32 = 7;
     for quirk in quirks {
         match quirk {
             TransportQuirk::IncrementHopLimit => {
-                if mesh_packet.hop_limit < 7 {
+                if mesh_packet.hop_limit < HOP_LIMIT_MAX {
                     mesh_packet.hop_limit += 1
                 }
             }
             TransportQuirk::SetViaMQTT => mesh_packet.via_mqtt = true,
             TransportQuirk::UnsetViaMQTT => mesh_packet.via_mqtt = false,
+            TransportQuirk::FixupHopStartIf0 => {
+                if mesh_packet.hop_start == 0 && mesh_packet.hop_limit == HOP_LIMIT_MAX {
+                    mesh_packet.hop_start = mesh_packet.hop_limit;
+                }
+            }
         }
     }
 }
