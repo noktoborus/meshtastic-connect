@@ -35,7 +35,7 @@ pub struct Incoming {
     pub data: DataVariant,
 }
 
-type SendData = (Option<mqtt::ChannelId>, meshtastic::MeshPacket);
+type SendData = (mqtt::ChannelId, meshtastic::MeshPacket);
 
 impl Sender {
     pub async fn send(&mut self, send_data: SendData) -> Result<(), std::io::Error> {
@@ -46,25 +46,17 @@ impl Sender {
                 udp.send(mesh_packet).await
             }
             Sender::Stream(stream) => {
-                if let Some(channel_id) = channel_id {
-                    println!("STREAM MQTT: Sending to {}...", channel_id);
-                    stream.send(mqtt_stream::MqttStreamSendData::MeshPacket(
+                println!("STREAM MQTT: Sending to {}...", channel_id);
+                stream
+                    .send(mqtt_stream::MqttStreamSendData::MeshPacket(
                         channel_id,
                         mesh_packet,
-                    )).await
-                } else {
-                    println!("STREAM MQTT SKIP: No channel ID provided");
-                    Ok(())
-                }
+                    ))
+                    .await
             }
             Sender::MQTT(mqtt) => {
-                if let Some(channel_id) = channel_id {
-                    println!("MQTT: Sending to {}...", channel_id);
-                    mqtt.send((channel_id, mesh_packet)).await
-                } else {
-                    println!("MQTT SKIP: No channel ID provided");
-                    Ok(())
-                }
+                println!("MQTT: Sending to {}...", channel_id);
+                mqtt.send((channel_id, mesh_packet)).await
             }
         }
     }

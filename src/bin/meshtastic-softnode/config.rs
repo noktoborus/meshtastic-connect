@@ -282,6 +282,8 @@ pub(crate) struct SoftNodeConfig {
     #[serde(default)]
     pub(crate) public_key: K256,
     #[serde(default)]
+    pub(crate) default_channel: String,
+    #[serde(default)]
     pub(crate) channels: Vec<SoftNodeChannel>,
 }
 
@@ -297,6 +299,7 @@ impl Default for SoftNodeConfig {
             node_id: NodeId::default(),
             private_key,
             public_key,
+            default_channel: "LongFast".into(),
             channels: vec![SoftNodeChannel {
                 name: "LongFast".into(),
                 disable_encryption: false,

@@ -247,6 +247,7 @@ async fn main() {
         router.add_connection(
             transport.name.clone(),
             transport.quirks.clone(),
+            soft_node.default_channel.clone(),
             connection::build(transport.clone(), &soft_node).await,
         );
     }

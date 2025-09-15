@@ -15,6 +15,7 @@ impl Router {
         &mut self,
         connection_name: String,
         quirks: TransportQuirks,
+        default_channel: String,
         connection: (
             connection::Sender,
             connection::Receiver,
@@ -28,6 +29,7 @@ impl Router {
         self.connections.push(ConnectionCapsule {
             id,
             name: connection_name,
+            default_channel,
             quirks,
             send: Arc::new(Mutex::new(send)),
         });
@@ -53,7 +55,15 @@ impl Router {
             }
             println!("> {:?} send: {:?}", capsule.name, mesh_packet);
             let mut mesh_packet = mesh_packet.clone();
-            let channel = channel.clone();
+            let channel = if let Some(channel) = channel.clone() {
+                channel
+            } else {
+                println!(
+                    "> {:?} use default channel: {}",
+                    capsule.name, capsule.default_channel
+                );
+                capsule.default_channel.clone()
+            };
 
             apply_quirk_to_packet(&mut mesh_packet, &capsule.quirks.output);
 
@@ -66,6 +76,7 @@ impl Router {
 struct ConnectionCapsule {
     id: ConnectionId,
     name: ConnectionName,
+    default_channel: String,
     quirks: TransportQuirks,
     send: Arc<Mutex<connection::Sender>>,
 }
