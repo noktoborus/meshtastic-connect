@@ -248,6 +248,8 @@ fn apply_quirk_to_packet(
                     mesh_packet.hop_start = mesh_packet.hop_limit;
                 }
             }
+            TransportQuirk::DropNextHop => mesh_packet.next_hop = 0,
+            TransportQuirk::DropRelayNode => mesh_packet.relay_node = 0,
         }
     }
 }
