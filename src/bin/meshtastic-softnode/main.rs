@@ -4,6 +4,7 @@ mod publish;
 mod router;
 mod schedule;
 mod sqlite;
+mod web;
 
 use clap::Parser;
 use meshtastic_connect::{
@@ -220,6 +221,16 @@ async fn main() {
     println!("{}", serde_yaml_ng::to_string(&config).unwrap());
     println!("=== ===");
 
+    let web_config = config.soft_node.web.clone();
+    println!("Webserver on {}...", web_config.http_listen);
+    let web_server_future = async || {
+        if web_config.enabled {
+            Some(web::start(web_config.clone()).await)
+        } else {
+            None
+        }
+    };
+
     let mut keyring = Keyring::new();
 
     for channel in config.keys.channels {
@@ -261,6 +272,15 @@ async fn main() {
             _ = sleep_until(next_wakeup) => {
                 handle_timer_event(&sqlite, &mut schedule, &soft_node, &keyring, &mut router).await;
             },
+            Some(result) = web_server_future() => {
+                match result {
+                    Ok(()) => {}
+                    Err(err) => {
+                        println!("handle web error: {}", err);
+                        exit(1);
+                    }
+                }
+            }
             result = router.recv_mesh() => {
                 match result {
                     Ok(recv_capsule) => { handle_network_event(&sqlite, &keyring, &mut router, recv_capsule).await; }

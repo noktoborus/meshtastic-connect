@@ -273,8 +273,28 @@ impl Default for SoftNodeTransport {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub(crate) struct WebConfig {
+    pub(crate) enabled: bool,
+    pub(crate) http_listen: SocketAddr,
+    // Serve this bundle on http's socket
+    pub(crate) serve_dir: String,
+}
+
+impl Default for WebConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            http_listen: "127.0.0.1:8080".parse().unwrap(),
+            serve_dir: "./web/".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct SoftNodeConfig {
     pub(crate) transport: Vec<SoftNodeTransport>,
+    #[serde(default)]
+    pub(crate) web: WebConfig,
     #[serde(default)]
     pub(crate) name: String,
     #[serde(default)]
@@ -297,6 +317,7 @@ impl Default for SoftNodeConfig {
         let public_key = private_key.public_key();
 
         Self {
+            web: Default::default(),
             transport: vec![Default::default()],
             name: "SoftNode".to_string(),
             short_name: "SFTN".to_string(),
