@@ -32,6 +32,13 @@ pub(crate) struct PublishNodeInfo {
     pub(crate) force: PublishNodeInfoOverride,
 }
 
+#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub(crate) struct PublishText {
+    pub(crate) interval: DurationString,
+    #[serde(default)]
+    pub(crate) text: String,
+}
+
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Ord, PartialOrd)]
 pub(crate) struct Role(meshtastic::config::device_config::Role);
 
@@ -125,6 +132,7 @@ impl<'de> Deserialize<'de> for HardwareModel {
 pub(crate) enum Publish {
     NodeInfo(PublishNodeInfo),
     Position(PublishPosition),
+    Text(PublishText),
 }
 
 pub(crate) trait Publishable {
@@ -137,6 +145,7 @@ impl Publishable for Publish {
         match self {
             Publish::NodeInfo(info) => info.interval(),
             Publish::Position(pos) => pos.interval(),
+            Publish::Text(text) => text.interval(),
         }
     }
 
@@ -144,6 +153,7 @@ impl Publishable for Publish {
         match self {
             Publish::NodeInfo(info) => info.pack_to_data(soft_node),
             Publish::Position(pos) => pos.pack_to_data(soft_node),
+            Publish::Text(text) => text.pack_to_data(soft_node),
         }
     }
 }
@@ -212,5 +222,18 @@ impl Publishable for PublishNodeInfo {
         };
 
         (meshtastic::PortNum::NodeinfoApp, node_info.encode_to_vec())
+    }
+}
+
+impl Publishable for PublishText {
+    fn interval(&self) -> Duration {
+        self.interval.into()
+    }
+
+    fn pack_to_data(&self, _: &SoftNodeConfig) -> (meshtastic::PortNum, Vec<u8>) {
+        (
+            meshtastic::PortNum::TextMessageApp,
+            self.text.encode_to_vec(),
+        )
     }
 }
