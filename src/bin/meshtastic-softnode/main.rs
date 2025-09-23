@@ -167,9 +167,9 @@ async fn handle_network_event(
                                     Some(&data.encode_to_vec()),
                                 )
                                 .unwrap();
-                            router
-                                .route_next(Some(cryptor.to_string()), recv_capsule)
-                                .await;
+                            // router
+                            //     .route_next(Some(cryptor.to_string()), recv_capsule)
+                            //     .await;
                         } else {
                             sqlite
                                 .insert_packet(
@@ -180,12 +180,12 @@ async fn handle_network_event(
                                     Some(encrypted_data),
                                 )
                                 .unwrap();
-                            let channel = if mesh_packet.pki_encrypted {
-                                Some("PKI".into())
-                            } else {
-                                None
-                            };
-                            router.route_next(channel, recv_capsule).await;
+                            // let channel = if mesh_packet.pki_encrypted {
+                            //     Some("PKI".into())
+                            // } else {
+                            //     None
+                            // };
+                            // router.route_next(channel, recv_capsule).await;
                         };
                     }
                 }
