@@ -1,5 +1,5 @@
 /target
-/connect.yaml
+/monitor.yaml
 /softnode.yaml
 /keys.yaml
 /journal-*.sqlite

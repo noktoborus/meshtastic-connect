@@ -1,17 +1,16 @@
-use meshtastic_connect::keyring;
+mod meshtastic_print;
 
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
+use meshtastic_connect::keyring;
 use meshtastic_connect::meshtastic::Heartbeat;
 use meshtastic_connect::meshtastic::to_radio::PayloadVariant;
-use meshtastic_connect::meshtastic_print::{
-    print_from_radio_payload, print_mesh_packet, print_service_envelope,
-};
 use meshtastic_connect::transport::stream::Stream;
 use meshtastic_connect::transport::udp::{Interface, Multicast};
 use meshtastic_connect::transport::{
     stream, stream::serial::SerialBuilder, stream::tcp::TcpBuilder, udp::UdpBuilder,
 };
+use meshtastic_print::{print_from_radio_payload, print_mesh_packet, print_service_envelope};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_yaml_ng::from_reader;
 
@@ -33,7 +32,7 @@ use tokio::time::Instant;
 #[command(version, about, long_about = None)]
 struct Args {
     // Path to config file
-    #[arg(short, long, default_value_t = String::from("connect.yaml"))]
+    #[arg(short, long, default_value_t = String::from("monitor.yaml"))]
     connection_file: String,
     // Path to file with keys to decode Peers and Channels messages
     #[arg(short, long, default_value_t = String::from("keys.yaml"))]
