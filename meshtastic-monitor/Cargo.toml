@@ -12,6 +12,6 @@ futures = "0.3.31"
 meshtastic-connect = { path = "../" }
 prost = "0.14.1"
 rumqttc = "0.25.0"
-serde = { version = "1.0.226", features = ["derive"] }
+serde = { version = "1.0.227", features = ["derive"] }
 serde_yaml_ng = "0.10.0"
 tokio = "1.47.1"

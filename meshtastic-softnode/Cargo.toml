@@ -15,7 +15,7 @@ meshtastic-connect = { path = "../" }
 prost = "0.14.1"
 rand = "0.9.2"
 rusqlite = "0.37.0"
-serde = { version = "1.0.226", features = ["derive"] }
+serde = { version = "1.0.227", features = ["derive"] }
 serde_yaml_ng = "0.10.0"
 tokio = "1.47.1"
 tower-http = { version = "0.6.6", features = ["fs"] }
