@@ -1,10 +1,13 @@
 use super::{key::K256, node_id::NodeId};
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, serde::Deserialize, serde::Serialize)]
 pub struct Peer {
+    #[serde(rename = "NodeId")]
     pub node_id: NodeId,
+    #[serde(rename = "PublicKey")]
     pub public_key: K256,
+    #[serde(rename = "PrivateKey")]
     pub private_key: Option<K256>,
 }
 

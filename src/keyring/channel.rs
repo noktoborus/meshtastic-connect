@@ -1,10 +1,13 @@
 use super::key::Key;
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, serde::Deserialize, serde::Serialize)]
 pub struct Channel {
+    #[serde(rename = "Name")]
     pub name: String,
+    #[serde(rename = "SharedKey")]
     pub key: Key,
+    #[serde(rename = "ChannelHash")]
     pub channel_hash: u32,
 }
 

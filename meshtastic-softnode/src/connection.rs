@@ -4,6 +4,7 @@ use futures::{
     stream::{SplitSink, SplitStream},
 };
 use meshtastic_connect::{
+    keyring::node_id::NodeId,
     meshtastic::{self, to_radio},
     transport::{
         if_index_by_addr, mqtt, mqtt_stream,
@@ -32,6 +33,7 @@ pub enum DataVariant {
 
 pub struct Incoming {
     pub channel_id: Option<mqtt::ChannelId>,
+    pub gateway_id: Option<NodeId>,
     pub data: DataVariant,
 }
 
@@ -70,11 +72,13 @@ async fn udp_next(udp: &mut SplitStream<udp::Udp>) -> Result<Incoming, std::io::
 
     Ok(Incoming {
         channel_id: None,
+        gateway_id: None,
         data: DataVariant::MeshPacket(mesh_packet),
     })
 }
 
 async fn stream_next(
+    // Need to add struct StreamContext to store: nodeid from `FromRadio(MyNodeInfo)` message
     stream_connection: &mut SplitStream<mqtt_stream::MqttStream>,
 ) -> Result<Incoming, std::io::Error> {
     let recv_data = stream_connection.next().await.ok_or(std::io::Error::new(
@@ -91,6 +95,7 @@ async fn stream_next(
 
             Incoming {
                 channel_id: None,
+                gateway_id: None,
                 data: DataVariant::Unstructured(message.into()),
             }
         }
@@ -98,9 +103,10 @@ async fn stream_next(
             _packet_id,
             mesh_packet,
             channel_id,
-            _gateway_id,
+            gateway_id,
         ) => Incoming {
             channel_id: Some(channel_id),
+            gateway_id: Some(gateway_id),
             data: DataVariant::MeshPacket(mesh_packet),
         },
         mqtt_stream::MqttStreamRecvData::FromRadio(_, from_radio) => {
@@ -111,12 +117,16 @@ async fn stream_next(
 
             Incoming {
                 channel_id: None,
+                // TODO: put stream's node id
+                gateway_id: None,
                 data: DataVariant::Unstructured(message.into()),
             }
         }
 
         mqtt_stream::MqttStreamRecvData::Unstructured(bytes_mut) => Incoming {
             channel_id: None,
+            // TODO: put stream's node id
+            gateway_id: None,
             data: DataVariant::Unstructured(bytes_mut.to_vec()),
         },
     };
@@ -124,10 +134,11 @@ async fn stream_next(
 }
 
 async fn mqtt_next(mqtt: &mut mqtt::MqttReceiver) -> Result<Incoming, std::io::Error> {
-    let (mesh_packet, channel_id, _) = mqtt.next().await?;
+    let (mesh_packet, channel_id, gateway_id) = mqtt.next().await?;
 
     Ok(Incoming {
         channel_id: Some(channel_id),
+        gateway_id: Some(gateway_id),
         data: DataVariant::MeshPacket(mesh_packet),
     })
 }

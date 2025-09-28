@@ -140,7 +140,7 @@ impl Default for Config {
             keys: KeysConfig {
                 channels: vec![
                     Channel {
-                        name: "LongFast".into(),
+                        name: " ".into(),
                         key: "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
                     },
                     Channel {

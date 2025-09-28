@@ -12,9 +12,11 @@ use key::{K256, Key};
 use node_id::NodeId;
 use peer::Peer;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Keyring {
+    #[serde(rename = "Channels")]
     channels: Vec<Channel>,
+    #[serde(rename = "Peers")]
     peers: HashMap<NodeId, Peer>,
 }
 

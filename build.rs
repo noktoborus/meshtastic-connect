@@ -31,24 +31,22 @@ fn main() {
         "meshtastic/xmodem.proto",
     ];
 
-    if !Path::new(protobuf_dir).exists() {
-        return;
-    }
+    if Path::new(protobuf_dir).exists() {
+        let mut protos_paths = vec![];
+        for proto in &protos {
+            protos_paths.push(PathBuf::from(protobuf_dir).join(proto));
+        }
 
-    let mut protos_paths = vec![];
-    for proto in &protos {
-        protos_paths.push(PathBuf::from(protobuf_dir).join(proto));
-    }
+        let mut config = prost_build::Config::new();
+        config.protoc_arg("--experimental_allow_proto3_optional");
+        config.out_dir("src");
 
-    let mut config = prost_build::Config::new();
-    config.protoc_arg("--experimental_allow_proto3_optional");
-    config.out_dir("src");
+        config
+            .compile_protos(&protos_paths, &[protobuf_dir])
+            .unwrap();
 
-    config
-        .compile_protos(&protos_paths, &[protobuf_dir])
-        .unwrap();
-
-    for proto in &protos_paths {
-        println!("cargo:rerun-if-changed={}", proto.display());
+        for proto in &protos_paths {
+            println!("cargo:rerun-if-changed={}", proto.display());
+        }
     }
 }

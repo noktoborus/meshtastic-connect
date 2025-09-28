@@ -44,14 +44,14 @@ fn crypt(
 }
 
 impl Decrypt for Symmetric {
-    async fn decrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
+    fn decrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
         crypt(&self.key, packet_id, self.from, buffer)
             .map_err(|e| format!("Unable to decrypt: {:?}", e))
     }
 }
 
 impl Encrypt for Symmetric {
-    async fn encrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
+    fn encrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
         crypt(&self.key, packet_id, self.from, buffer)
             .map_err(|e| format!("Unable to encrypt: {:?}", e))
     }

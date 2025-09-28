@@ -126,7 +126,7 @@ pub async fn print_mesh_packet(mesh_packet: MeshPacket, channel_list: &Keyring) 
                 let decryptor = decryptor.unwrap();
                 println!("  <decrypting {} bytes for {}>", items.len(), decryptor);
 
-                match decryptor.decrypt(mesh_packet.id, items).await {
+                match decryptor.decrypt(mesh_packet.id, items) {
                     Ok(buffer) => match meshtastic::Data::decode(buffer.as_slice()) {
                         Ok(data) => match print_decoded(data).await {
                             Ok(_) => {}

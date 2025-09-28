@@ -46,7 +46,7 @@ async fn handle_timer_event(
         );
         let (port_num, data_payload) = publish_descriptor.pack_to_data(&soft_node);
         let packet_id: u32 = rand::rng().random();
-        let dest_node: u32 = 0xffffffff;
+        let dest_node: NodeId = NodeId::broadcast();
         let data = meshtastic::Data {
             portnum: port_num.into(),
             payload: data_payload,
@@ -63,10 +63,7 @@ async fn handle_timer_event(
                 .cryptor_for_channel_name(soft_node.node_id, &channel.name)
                 .unwrap();
 
-            let encrypted_data = cryptor
-                .encrypt(packet_id, data.encode_to_vec())
-                .await
-                .unwrap();
+            let encrypted_data = cryptor.encrypt(packet_id, data.encode_to_vec()).unwrap();
             (
                 channel_hash,
                 mesh_packet::PayloadVariant::Encrypted(encrypted_data),
@@ -88,12 +85,14 @@ async fn handle_timer_event(
         println!("send mesh: {:?}", mesh_packet);
         sqlite
             .insert_packet(
-                &soft_node.node_id.to_string(),
+                soft_node.node_id.into(),
+                &soft_node.node_id.into(),
                 &mesh_packet,
                 Some(channel.name.clone()),
                 Some(port_num),
                 Some(&data.encode_to_vec()),
             )
+            .await
             .unwrap();
         router
             .send_mesh(Some(channel.name.clone()), mesh_packet)
@@ -112,6 +111,8 @@ async fn handle_network_event(
     router: &mut router::Router,
     recv_capsule: router::ReceiveCapsule,
 ) {
+    let gateway = recv_capsule.incoming.gateway_id;
+
     match &recv_capsule.incoming.data {
         connection::DataVariant::MeshPacket(mesh_packet) => {
             if let Some(ref payload_variant) = mesh_packet.payload_variant {
@@ -119,12 +120,14 @@ async fn handle_network_event(
                     mesh_packet::PayloadVariant::Decoded(data) => {
                         sqlite
                             .insert_packet(
+                                gateway,
                                 &recv_capsule.source_connection_name,
                                 &mesh_packet,
                                 None,
                                 Some(data.portnum()),
                                 Some(&data.encode_to_vec()),
                             )
+                            .await
                             .unwrap();
                         // router: get channel name by mesh_packet.channel (number of channel)
                     }
@@ -135,10 +138,7 @@ async fn handle_network_event(
                             mesh_packet.channel,
                         ) {
                             Some(cryptor) => {
-                                match cryptor
-                                    .decrypt(mesh_packet.id, encrypted_data.clone())
-                                    .await
-                                {
+                                match cryptor.decrypt(mesh_packet.id, encrypted_data.clone()) {
                                     Ok(decrypted_data) => {
                                         match meshtastic::Data::decode(decrypted_data.as_slice()) {
                                             Ok(data) => Some((cryptor, data)),
@@ -161,12 +161,14 @@ async fn handle_network_event(
                         } {
                             sqlite
                                 .insert_packet(
+                                    gateway,
                                     &recv_capsule.source_connection_name,
                                     &mesh_packet,
                                     Some(cryptor.to_string()),
                                     Some(data.portnum()),
                                     Some(&data.encode_to_vec()),
                                 )
+                                .await
                                 .unwrap();
                             // router
                             //     .route_next(Some(cryptor.to_string()), recv_capsule)
@@ -174,12 +176,14 @@ async fn handle_network_event(
                         } else {
                             sqlite
                                 .insert_packet(
+                                    gateway,
                                     &recv_capsule.source_connection_name,
                                     &mesh_packet,
                                     None,
                                     None,
                                     Some(encrypted_data),
                                 )
+                                .await
                                 .unwrap();
                             // let channel = if mesh_packet.pki_encrypted {
                             //     Some("PKI".into())
@@ -194,12 +198,14 @@ async fn handle_network_event(
                 println!("No data received: {:?}", mesh_packet);
                 sqlite
                     .insert_packet(
+                        gateway,
                         &recv_capsule.source_connection_name,
                         &mesh_packet,
                         None,
                         None,
                         None,
                     )
+                    .await
                     .unwrap();
             }
         }
@@ -221,11 +227,21 @@ async fn main() {
     println!("{}", serde_yaml_ng::to_string(&config).unwrap());
     println!("=== ===");
 
-    let web_config = config.soft_node.web.clone();
-    println!("Webserver on {}...", web_config.http_listen);
+    let soft_node = config.soft_node;
+    let mut schedule = schedule::Schedule::new(&soft_node.channels);
+    let mut router = router::Router::default();
+    let sqlite_name = format!("journal-{:x}.sqlite", soft_node.node_id);
+    let sqlite = sqlite::SQLite::new(sqlite_name.as_str()).await.unwrap();
+
+    let web_config = soft_node.web.clone();
+    if web_config.enabled {
+        println!("Webserver on {}...", web_config.http_listen);
+        web::init();
+    }
+    let web_sqlite = sqlite.clone();
     let web_server_future = async || {
         if web_config.enabled {
-            Some(web::start(web_config.clone()).await)
+            Some(web::start(web_config.clone(), web_sqlite).await)
         } else {
             None
         }
@@ -248,11 +264,6 @@ async fn main() {
     }
 
     println!();
-    let soft_node = config.soft_node;
-    let mut schedule = schedule::Schedule::new(&soft_node.channels);
-    let sqlite_name = format!("journal-{:x}.sqlite", soft_node.node_id);
-    let sqlite = sqlite::SQLite::new(sqlite_name.as_str()).unwrap();
-    let mut router = router::Router::default();
 
     for transport in &soft_node.transport {
         router.add_connection(
@@ -272,7 +283,7 @@ async fn main() {
             _ = sleep_until(next_wakeup) => {
                 handle_timer_event(&sqlite, &mut schedule, &soft_node, &keyring, &mut router).await;
             },
-            Some(result) = web_server_future() => {
+            Some(result) = web_server_future.clone()() => {
                 match result {
                     Ok(()) => {}
                     Err(err) => {

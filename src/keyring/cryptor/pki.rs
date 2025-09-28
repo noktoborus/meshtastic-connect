@@ -47,7 +47,7 @@ const AUTH_LEN: usize = 8;
 const EXTRA_NONCE_LEN: usize = 4;
 
 impl Decrypt for PKI {
-    async fn decrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
+    fn decrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
         if buffer.len() < AUTH_LEN + EXTRA_NONCE_LEN {
             return Err(format!(
                 "PKI: {} bytes is not enough to decode",
@@ -80,7 +80,7 @@ fn generate_extra_nonce() -> [u8; EXTRA_NONCE_LEN] {
 }
 
 impl Encrypt for PKI {
-    async fn encrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
+    fn encrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
         let extra_nonce = generate_extra_nonce();
         let nonce = prepare_nonce(packet_id, self.from, &extra_nonce);
 

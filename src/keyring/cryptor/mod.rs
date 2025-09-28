@@ -7,11 +7,7 @@ pub mod pki;
 pub mod symmetric;
 
 pub trait Decrypt {
-    fn decrypt(
-        &self,
-        packet_id: u32,
-        data: Vec<u8>,
-    ) -> impl std::future::Future<Output = Result<Vec<u8>, String>> + Send;
+    fn decrypt(&self, packet_id: u32, data: Vec<u8>) -> Result<Vec<u8>, String>;
 }
 
 pub enum Cryptor {
@@ -29,27 +25,23 @@ impl fmt::Display for Cryptor {
 }
 
 impl Decrypt for Cryptor {
-    async fn decrypt(&self, packet_id: u32, data: Vec<u8>) -> Result<Vec<u8>, String> {
+    fn decrypt(&self, packet_id: u32, data: Vec<u8>) -> Result<Vec<u8>, String> {
         match self {
-            Cryptor::Symmetric(_, symmetric) => symmetric.decrypt(packet_id, data).await,
-            Cryptor::PKI(pki) => pki.decrypt(packet_id, data).await,
+            Cryptor::Symmetric(_, symmetric) => symmetric.decrypt(packet_id, data),
+            Cryptor::PKI(pki) => pki.decrypt(packet_id, data),
         }
     }
 }
 
 pub trait Encrypt {
-    fn encrypt(
-        &self,
-        packet_id: u32,
-        data: Vec<u8>,
-    ) -> impl std::future::Future<Output = Result<Vec<u8>, String>> + Send;
+    fn encrypt(&self, packet_id: u32, data: Vec<u8>) -> Result<Vec<u8>, String>;
 }
 
 impl Encrypt for Cryptor {
-    async fn encrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
+    fn encrypt(&self, packet_id: u32, buffer: Vec<u8>) -> Result<Vec<u8>, String> {
         match self {
-            Cryptor::Symmetric(_, symmetric) => symmetric.encrypt(packet_id, buffer).await,
-            Cryptor::PKI(pki) => pki.encrypt(packet_id, buffer).await,
+            Cryptor::Symmetric(_, symmetric) => symmetric.encrypt(packet_id, buffer),
+            Cryptor::PKI(pki) => pki.encrypt(packet_id, buffer),
         }
     }
 }
