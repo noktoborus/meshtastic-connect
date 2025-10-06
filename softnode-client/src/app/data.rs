@@ -229,7 +229,18 @@ impl NodeInfo {
         };
         let list = self.telemetry.entry(telemetry_variant).or_default();
 
-        if !list.contains(&telemetry) {
+        if !list.is_empty() {
+            for (i, v) in list.iter().rev().enumerate() {
+                if v == &telemetry {
+                    break;
+                }
+
+                if timestamp > v.timestamp {
+                    list.insert(list.len() - i, telemetry);
+                    break;
+                }
+            }
+        } else {
             list.push(telemetry);
         }
     }
