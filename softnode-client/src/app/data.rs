@@ -105,7 +105,7 @@ impl<'de> serde::Deserialize<'de> for DataVariant {
     }
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Clone, PartialEq, PartialOrd)]
 pub struct StoreMeshRxInfo {
     pub rx_time: DateTime<Utc>,
     pub rx_snr: f32,
@@ -206,6 +206,26 @@ pub struct Position {
     pub speed: u32,
 }
 
+#[derive(serde::Deserialize, serde::Serialize, PartialEq, PartialOrd)]
+pub enum NodePacketType {
+    Normal(String),
+    CannotDecrypt,
+    Error,
+    Empty,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, PartialEq, PartialOrd)]
+pub struct NodePacket {
+    pub timestamp: DateTime<Utc>,
+    pub packet_type: NodePacketType,
+    pub to: NodeId,
+    pub channel: u32,
+    pub rx_info: Option<StoreMeshRxInfo>,
+    pub gateway: Option<NodeId>,
+    pub packet_id: u32,
+    pub hop_limit: u32,
+}
+
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct NodeInfo {
     pub name: Option<String>,
@@ -214,6 +234,26 @@ pub struct NodeInfo {
     pub pkey: Option<Key>,
     pub position: Vec<Position>,
     pub telemetry: HashMap<TelemetryVariant, Vec<NodeTelemetry>>,
+    pub packet_statistics: Vec<NodePacket>,
+}
+
+macro_rules! push_statistic {
+    ($list:expr, $timestamp:expr, $packet:expr) => {
+        if !$list.is_empty() {
+            for (i, v) in $list.iter().rev().enumerate() {
+                if v == &$packet {
+                    break;
+                }
+
+                if $timestamp > v.timestamp {
+                    $list.insert($list.len() - i, $packet);
+                    break;
+                }
+            }
+        } else {
+            $list.push($packet);
+        }
+    };
 }
 
 impl NodeInfo {
@@ -229,210 +269,212 @@ impl NodeInfo {
         };
         let list = self.telemetry.entry(telemetry_variant).or_default();
 
-        if !list.is_empty() {
-            for (i, v) in list.iter().rev().enumerate() {
-                if v == &telemetry {
-                    break;
-                }
-
-                if timestamp > v.timestamp {
-                    list.insert(list.len() - i, telemetry);
-                    break;
-                }
-            }
-        } else {
-            list.push(telemetry);
-        }
+        push_statistic!(list, timestamp, telemetry);
     }
 
     fn update_using_data(
         &mut self,
         stored_timestamp: DateTime<Utc>,
-        data: &DataVariant,
-    ) -> Result<(), String> {
-        if let DataVariant::Decrypted(data) = data {
-            match data.portnum() {
-                meshtastic::PortNum::PositionApp => {
-                    let mesh_position = meshtastic::Position::decode(data.payload.as_slice())
-                        .map_err(|e| e.to_string())?;
+        data: &meshtastic::Data,
+    ) -> Result<meshtastic::PortNum, String> {
+        match data.portnum() {
+            meshtastic::PortNum::PositionApp => {
+                let mesh_position = meshtastic::Position::decode(data.payload.as_slice())
+                    .map_err(|e| e.to_string())?;
 
-                    let altitude = if let Some(altitude) = mesh_position.altitude {
-                        altitude
-                    } else if let Some(altitude) = mesh_position.altitude_hae {
-                        altitude
-                    } else if let Some(altitude) = mesh_position.altitude_geoidal_separation {
-                        altitude
-                    } else {
-                        0
-                    };
+                let altitude = if let Some(altitude) = mesh_position.altitude {
+                    altitude
+                } else if let Some(altitude) = mesh_position.altitude_hae {
+                    altitude
+                } else if let Some(altitude) = mesh_position.altitude_geoidal_separation {
+                    altitude
+                } else {
+                    0
+                };
 
-                    let position = Position {
-                        seq_number: mesh_position.seq_number,
-                        timestamp: DateTime::from_timestamp(mesh_position.timestamp as i64, 0)
-                            .unwrap_or(Default::default()),
-                        latitude: mesh_position.latitude_i() as f64 * 1e-7,
-                        longitude: mesh_position.longitude_i() as f64 * 1e-7,
-                        altitude,
-                        speed: mesh_position.ground_speed(),
-                    };
+                let position = Position {
+                    seq_number: mesh_position.seq_number,
+                    timestamp: DateTime::from_timestamp(mesh_position.timestamp as i64, 0)
+                        .unwrap_or(Default::default()),
+                    latitude: mesh_position.latitude_i() as f64 * 1e-7,
+                    longitude: mesh_position.longitude_i() as f64 * 1e-7,
+                    altitude,
+                    speed: mesh_position.ground_speed(),
+                };
 
-                    self.position.push(position);
-                }
-                meshtastic::PortNum::NodeinfoApp => {
-                    let user = meshtastic::User::decode(data.payload.as_slice())
-                        .map_err(|e| e.to_string())?;
-                    self.name = Some(user.long_name);
-                    self.short_name = Some(user.short_name);
-                    if user.public_key.len() > 0 {
-                        self.pkey = Some(Key::try_from(user.public_key)?);
-                    }
-                }
-                meshtastic::PortNum::TelemetryApp => {
-                    let telemetry = meshtastic::Telemetry::decode(data.payload.as_slice())
-                        .map_err(|e| e.to_string())?;
-                    // let timestamp = DateTime::from_timestamp(telemetry.time as i64, 0)
-                    //     .map(|v| {
-                    //         if v == DateTime::<Utc>::default() {
-                    //             stored_timestamp
-                    //         } else {
-                    //             v
-                    //         }
-                    //     })
-                    //     .unwrap_or_else(|| stored_timestamp);
-                    //
-                    // Received timestamp may be buggy, so use the stored timestamp
-                    let timestamp = stored_timestamp;
-
-                    match telemetry.variant.ok_or(format!("Telemetry is empty"))? {
-                        meshtastic::telemetry::Variant::DeviceMetrics(_device_metrics) => {
-                            log::info!("Telemetry::DeviceMetrics ignored");
-                        }
-                        meshtastic::telemetry::Variant::EnvironmentMetrics(environment_metrics) => {
-                            if let Some(barometric) = environment_metrics.barometric_pressure {
-                                self.push_telemetry(
-                                    timestamp,
-                                    TelemetryVariant::BarometricPressure,
-                                    barometric as f64,
-                                );
-                            }
-                            if let Some(temperature) = environment_metrics.temperature {
-                                self.push_telemetry(
-                                    timestamp,
-                                    TelemetryVariant::Temperature,
-                                    temperature as f64,
-                                );
-                            }
-                            if let Some(lux) = environment_metrics.lux {
-                                self.push_telemetry(timestamp, TelemetryVariant::Lux, lux as f64);
-                            }
-                            if let Some(iaq) = environment_metrics.iaq {
-                                self.push_telemetry(timestamp, TelemetryVariant::Iaq, iaq as f64);
-                            }
-                            if let Some(humidity) = environment_metrics.relative_humidity {
-                                self.push_telemetry(
-                                    timestamp,
-                                    TelemetryVariant::Humidity,
-                                    humidity as f64,
-                                );
-                            }
-                            if let Some(gas_resistance) = environment_metrics.gas_resistance {
-                                self.push_telemetry(
-                                    timestamp,
-                                    TelemetryVariant::GasResistance,
-                                    gas_resistance as f64,
-                                );
-                            }
-                            if let Some(radiation) = environment_metrics.radiation {
-                                self.push_telemetry(
-                                    timestamp,
-                                    TelemetryVariant::Radiation,
-                                    radiation as f64,
-                                );
-                            }
-                        }
-                        meshtastic::telemetry::Variant::AirQualityMetrics(_air_quality_metrics) => {
-                            log::info!("Telemetry::AirQualityMetrics ignored");
-                        }
-                        meshtastic::telemetry::Variant::PowerMetrics(power_metrics) => {
-                            if let Some(current) = power_metrics.ch1_current {
-                                self.push_telemetry(
-                                    timestamp,
-                                    TelemetryVariant::PowerMetricCurrent(1),
-                                    current as f64,
-                                );
-                            }
-                            if let Some(current) = power_metrics.ch2_current {
-                                self.push_telemetry(
-                                    timestamp,
-                                    TelemetryVariant::PowerMetricCurrent(2),
-                                    current as f64,
-                                );
-                            }
-                            if let Some(current) = power_metrics.ch3_current {
-                                self.push_telemetry(
-                                    timestamp,
-                                    TelemetryVariant::PowerMetricCurrent(3),
-                                    current as f64,
-                                );
-                            }
-                            if let Some(voltage) = power_metrics.ch1_voltage {
-                                self.push_telemetry(
-                                    timestamp,
-                                    TelemetryVariant::PowerMetricVoltage(1),
-                                    voltage as f64,
-                                )
-                            }
-                            if let Some(voltage) = power_metrics.ch2_voltage {
-                                self.push_telemetry(
-                                    timestamp,
-                                    TelemetryVariant::PowerMetricVoltage(2),
-                                    voltage as f64,
-                                );
-                            }
-                            if let Some(voltage) = power_metrics.ch3_voltage {
-                                self.push_telemetry(
-                                    timestamp,
-                                    TelemetryVariant::PowerMetricVoltage(3),
-                                    voltage as f64,
-                                );
-                            }
-                        }
-                        meshtastic::telemetry::Variant::LocalStats(_local_stats) => {
-                            log::info!("Telemetry::LocalStats ignored");
-                        }
-                        meshtastic::telemetry::Variant::HealthMetrics(_health_metrics) => {
-                            log::info!("Telemetry::HealthMetrics ignored");
-                        }
-                        meshtastic::telemetry::Variant::HostMetrics(_host_metrics) => {
-                            log::info!("Telemetry::HostMetrics ignored");
-                        }
-                    }
-                }
-                _ => {}
+                self.position.push(position);
             }
-        }
+            meshtastic::PortNum::NodeinfoApp => {
+                let user =
+                    meshtastic::User::decode(data.payload.as_slice()).map_err(|e| e.to_string())?;
+                self.name = Some(user.long_name);
+                self.short_name = Some(user.short_name);
+                if user.public_key.len() > 0 {
+                    self.pkey = Some(Key::try_from(user.public_key)?);
+                }
+            }
+            meshtastic::PortNum::TelemetryApp => {
+                let telemetry = meshtastic::Telemetry::decode(data.payload.as_slice())
+                    .map_err(|e| e.to_string())?;
+                // let timestamp = DateTime::from_timestamp(telemetry.time as i64, 0)
+                //     .map(|v| {
+                //         if v == DateTime::<Utc>::default() {
+                //             stored_timestamp
+                //         } else {
+                //             v
+                //         }
+                //     })
+                //     .unwrap_or_else(|| stored_timestamp);
+                //
+                // Received timestamp may be buggy, so use the stored timestamp
+                let timestamp = stored_timestamp;
 
-        Ok(())
+                match telemetry.variant.ok_or(format!("Telemetry is empty"))? {
+                    meshtastic::telemetry::Variant::DeviceMetrics(_device_metrics) => {
+                        log::info!("Telemetry::DeviceMetrics ignored");
+                    }
+                    meshtastic::telemetry::Variant::EnvironmentMetrics(environment_metrics) => {
+                        if let Some(barometric) = environment_metrics.barometric_pressure {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::BarometricPressure,
+                                barometric as f64,
+                            );
+                        }
+                        if let Some(temperature) = environment_metrics.temperature {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::Temperature,
+                                temperature as f64,
+                            );
+                        }
+                        if let Some(lux) = environment_metrics.lux {
+                            self.push_telemetry(timestamp, TelemetryVariant::Lux, lux as f64);
+                        }
+                        if let Some(iaq) = environment_metrics.iaq {
+                            self.push_telemetry(timestamp, TelemetryVariant::Iaq, iaq as f64);
+                        }
+                        if let Some(humidity) = environment_metrics.relative_humidity {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::Humidity,
+                                humidity as f64,
+                            );
+                        }
+                        if let Some(gas_resistance) = environment_metrics.gas_resistance {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::GasResistance,
+                                gas_resistance as f64,
+                            );
+                        }
+                        if let Some(radiation) = environment_metrics.radiation {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::Radiation,
+                                radiation as f64,
+                            );
+                        }
+                    }
+                    meshtastic::telemetry::Variant::AirQualityMetrics(_air_quality_metrics) => {
+                        log::info!("Telemetry::AirQualityMetrics ignored");
+                    }
+                    meshtastic::telemetry::Variant::PowerMetrics(power_metrics) => {
+                        if let Some(current) = power_metrics.ch1_current {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::PowerMetricCurrent(1),
+                                current as f64,
+                            );
+                        }
+                        if let Some(current) = power_metrics.ch2_current {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::PowerMetricCurrent(2),
+                                current as f64,
+                            );
+                        }
+                        if let Some(current) = power_metrics.ch3_current {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::PowerMetricCurrent(3),
+                                current as f64,
+                            );
+                        }
+                        if let Some(voltage) = power_metrics.ch1_voltage {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::PowerMetricVoltage(1),
+                                voltage as f64,
+                            )
+                        }
+                        if let Some(voltage) = power_metrics.ch2_voltage {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::PowerMetricVoltage(2),
+                                voltage as f64,
+                            );
+                        }
+                        if let Some(voltage) = power_metrics.ch3_voltage {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::PowerMetricVoltage(3),
+                                voltage as f64,
+                            );
+                        }
+                    }
+                    meshtastic::telemetry::Variant::LocalStats(_local_stats) => {
+                        log::info!("Telemetry::LocalStats ignored");
+                    }
+                    meshtastic::telemetry::Variant::HealthMetrics(_health_metrics) => {
+                        log::info!("Telemetry::HealthMetrics ignored");
+                    }
+                    meshtastic::telemetry::Variant::HostMetrics(_host_metrics) => {
+                        log::info!("Telemetry::HostMetrics ignored");
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(data.portnum())
     }
 
     pub fn update(&mut self, stored_mesh_packet: &StoredMeshPacket) {
         let timestamp = stored_mesh_packet.store_timestamp;
-
         // TODO: move to perday_telemetry
         // self.push_telemetry(timestamp, TelemetryVariant::MeshPacket, 1);
+        let packet_type = if let Some(data) = &stored_mesh_packet.data {
+            match data {
+                DataVariant::Encrypted(_) => NodePacketType::CannotDecrypt,
+                DataVariant::Decrypted(data) => match self.update_using_data(timestamp, data) {
+                    Ok(portnum) => NodePacketType::Normal(format!("{}", portnum.as_str_name())),
+                    Err(e) => {
+                        log::error!("Failed to update using data: {}", e);
+                        NodePacketType::Error
+                        // TODO: move to perday_telemetry
+                        // self.push_telemetry(timestamp, TelemetryVariant::CorruptedPacket, 1);
+                    }
+                },
 
-        if let Some(data) = &stored_mesh_packet.data {
-            match self.update_using_data(timestamp, data) {
-                Ok(()) => (),
-                Err(e) => {
-                    log::error!("Failed to update using data: {}", e);
-                    // TODO: move to perday_telemetry
-                    // self.push_telemetry(timestamp, TelemetryVariant::CorruptedPacket, 1);
-                }
+                DataVariant::DecryptError(_, _) => NodePacketType::Error,
             }
         } else {
+            NodePacketType::Empty
             // TODO: move to perday_telemetry
             // self.push_telemetry(timestamp, TelemetryVariant::EmptyPackets, 1);
-        }
+        };
+
+        let packet = NodePacket {
+            timestamp,
+            packet_type,
+            to: stored_mesh_packet.header.to,
+            channel: stored_mesh_packet.header.channel,
+            rx_info: stored_mesh_packet.header.rx.clone(),
+            gateway: stored_mesh_packet.gateway,
+            packet_id: stored_mesh_packet.header.id,
+            hop_limit: stored_mesh_packet.header.hop_limit,
+        };
+
+        push_statistic!(self.packet_statistics, timestamp, packet);
     }
 }
