@@ -35,18 +35,19 @@ impl Default for UpdateState {
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct PersistentData {
-    nodes: HashMap<NodeId, NodeInfo>,
     keyring: Keyring,
 
     active_panel: Panel,
     list_panel: ListPanel,
 
-    last_sync_point: Option<u64>,
     update_interval_secs: Duration,
 }
 
 #[derive(Default)]
 pub struct SoftNodeApp {
+    nodes: HashMap<NodeId, NodeInfo>,
+    last_sync_point: Option<u64>,
+
     persistent: PersistentData,
     downloads: Arc<Mutex<UpdateState>>,
 }
@@ -74,11 +75,9 @@ impl Default for PersistentData {
         }
 
         Self {
-            nodes: HashMap::new(),
             keyring,
             active_panel: Panel::Journal(Journal::default()),
             list_panel: ListPanel {},
-            last_sync_point: None,
             update_interval_secs: Duration::seconds(5),
         }
     }
@@ -127,17 +126,13 @@ impl SoftNodeApp {
 
                     let stored_mesh_packet = stored_mesh_packet.decrypt(&self.persistent.keyring);
 
-                    let entry =
-                        self.persistent
-                            .nodes
-                            .entry(node_id)
-                            .or_insert_with(|| data::NodeInfo {
-                                node_id,
-                                ..Default::default()
-                            });
+                    let entry = self.nodes.entry(node_id).or_insert_with(|| data::NodeInfo {
+                        node_id,
+                        ..Default::default()
+                    });
 
                     entry.update(&stored_mesh_packet);
-                    self.persistent.last_sync_point = Some(stored_mesh_packet.sequence_number);
+                    self.last_sync_point = Some(stored_mesh_packet.sequence_number);
                 }
                 if mesh_packets_count != 0 {
                     *downloads = UpdateState::IdleSince(Default::default());
@@ -155,7 +150,7 @@ impl SoftNodeApp {
 
                 if elapsed >= self.persistent.update_interval_secs {
                     let ctx = ctx.clone();
-                    let request = if let Some(sync_point) = self.persistent.last_sync_point {
+                    let request = if let Some(sync_point) = self.last_sync_point {
                         ehttp::Request::get(format!("{}?start={}", API_ADDRESS, sync_point))
                     } else {
                         ehttp::Request::get(API_ADDRESS)
@@ -267,7 +262,7 @@ impl eframe::App for SoftNodeApp {
         });
 
         let list_panel = &mut self.persistent.list_panel;
-        let nodes_list = self.persistent.nodes.iter().map(|(_, v)| v).collect();
+        let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
         match self.persistent.active_panel {
             Panel::Journal(ref mut journal) => {
                 list_panel.ui(ctx, nodes_list, false);
@@ -278,7 +273,7 @@ impl eframe::App for SoftNodeApp {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                     let mut telemetry_list = Vec::new();
-                    for (node_id, node_info) in &self.persistent.nodes {
+                    for (node_id, node_info) in &self.nodes {
                         if let Some(list) = node_info
                             .telemetry
                             .get(&data::TelemetryVariant::Temperature)
@@ -307,8 +302,8 @@ impl eframe::App for SoftNodeApp {
             }
             Panel::Settings(ref mut settings) => {
                 if settings.ui(ctx, &mut self.persistent.keyring) {
-                    self.persistent.last_sync_point = None;
-                    self.persistent.nodes.clear();
+                    self.last_sync_point = None;
+                    self.nodes.clear();
                     self.persistent.active_panel = Panel::Journal(Journal {});
                     ctx.request_repaint();
                 }
