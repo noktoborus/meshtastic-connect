@@ -5,7 +5,7 @@ mod telemetry;
 use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Duration, Local, Utc};
-use data::{NodeInfo, StoredMeshPacket};
+use data::{NodeInfo, StoredMeshPacket, TelemetryVariant};
 use egui::mutex::Mutex;
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
@@ -77,7 +77,7 @@ impl Default for PersistentData {
         Self {
             keyring,
             active_panel: Panel::Journal(Journal::default()),
-            list_panel: ListPanel {},
+            list_panel: Default::default(),
             update_interval_secs: Duration::seconds(5),
         }
     }
@@ -179,39 +179,80 @@ impl SoftNodeApp {
     }
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
-struct ListPanel {}
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+struct ListPanel {
+    telemetry_enabled_for: HashMap<TelemetryVariant, Vec<NodeId>>,
+}
 
 impl ListPanel {
-    fn ui(&mut self, ctx: &egui::Context, nodes: Vec<&NodeInfo>, filter_to_telemetry: bool) {
+    fn ui(&mut self, ctx: &egui::Context, nodes: Vec<&NodeInfo>, is_telemetry_page: bool) {
         egui::SidePanel::left("list_panel")
-            .resizable(false)
-            .default_width(200.0)
+            .resizable(true)
+            .default_width(300.0)
+            .min_width(200.0)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    for node_info in nodes {
-                        if filter_to_telemetry {
-                            if let Some(list) = node_info
-                                .telemetry
-                                .get(&data::TelemetryVariant::Temperature)
-                            {
-                                if list.len() <= 1 {
+                    ui.vertical(|ui| {
+                        for node_info in nodes {
+                            let telemetry_variants = is_telemetry_page.then(|| {
+                                node_info
+                                    .telemetry
+                                    .iter()
+                                    .map(|(k, v)| (k, v.len()))
+                                    .filter(|(_, v)| *v > 1)
+                                    .map(|(k, _)| k)
+                                    .collect::<Vec<_>>()
+                            });
+                            if let Some(ref telemetry_variants) = telemetry_variants {
+                                if telemetry_variants.is_empty() {
                                     continue;
                                 }
-                            } else {
-                                continue;
                             }
-                        }
+                            ui.separator();
+                            if let Some(extended) = node_info.extended_info_history.last() {
+                                let node_id_str = node_info.node_id.to_string();
+                                if node_id_str.ends_with(extended.short_name.as_str()) {
+                                    ui.heading(node_id_str);
+                                } else {
+                                    ui.heading(format!("{} {}", node_id_str, extended.short_name));
+                                }
+                                if extended.long_name.len() > 0 {
+                                    ui.label(extended.long_name.clone());
+                                }
+                            } else {
+                                ui.heading(node_info.node_id.to_string());
+                            }
+                            ui.add_space(5.0);
+                            if let Some(telemetry_variants) = telemetry_variants {
+                                for telemetry_variant in telemetry_variants {
+                                    let position = self
+                                        .telemetry_enabled_for
+                                        .get(telemetry_variant)
+                                        .map(|v| v.iter().position(|v| v == &node_info.node_id))
+                                        .unwrap_or(None);
+                                    let mut enabled = position.is_some();
 
-                        ui.add_sized(
-                            [200.0, 20.0],
-                            egui::Label::new(format!(
-                                "!{:08x} ({})",
-                                node_info.node_id,
-                                node_info.short_name.clone().unwrap_or("".to_string())
-                            )),
-                        );
-                    }
+                                    ui.checkbox(&mut enabled, telemetry_variant.to_string());
+
+                                    if enabled && position.is_none() {
+                                        self.telemetry_enabled_for
+                                            .entry(*telemetry_variant)
+                                            .and_modify(|v| v.push(node_info.node_id))
+                                            .or_insert(vec![node_info.node_id]);
+                                    } else if !enabled {
+                                        if let Some(position) = position {
+                                            self.telemetry_enabled_for
+                                                .entry(*telemetry_variant)
+                                                .and_modify(|v| {
+                                                    v.swap_remove(position);
+                                                });
+                                        }
+                                    }
+                                }
+                            }
+                            ui.add_space(10.0);
+                        }
+                    });
                 });
             });
     }
@@ -273,30 +314,39 @@ impl eframe::App for SoftNodeApp {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                     let mut telemetry_list = Vec::new();
-                    for (node_id, node_info) in &self.nodes {
-                        if let Some(list) = node_info
-                            .telemetry
-                            .get(&data::TelemetryVariant::Temperature)
-                        {
-                            if list.len() <= 1 {
-                                continue;
-                            }
-                            if let Some(first) = list.first() {
-                                start_datetime = first.timestamp.min(start_datetime);
-                                let title = node_info
-                                    .name
-                                    .clone()
-                                    .map(|v| format!("{} {}", node_id, v))
-                                    .unwrap_or(node_id.to_string());
-                                telemetry_list.push((title, list));
+
+                    for (telemetry_variant, enabled_for) in
+                        self.persistent.list_panel.telemetry_enabled_for.iter()
+                    {
+                        for node_id in enabled_for {
+                            if let Some(node_info) = self.nodes.get(node_id) {
+                                if let Some(list) = node_info.telemetry.get(telemetry_variant) {
+                                    if list.len() <= 1 {
+                                        continue;
+                                    }
+                                    if let Some(first) = list.first() {
+                                        start_datetime = first.timestamp.min(start_datetime);
+                                        let title = if let Some(extended) =
+                                            node_info.extended_info_history.last()
+                                        {
+                                            format!(
+                                                "{}: {} {}",
+                                                telemetry_variant, node_id, extended.short_name
+                                            )
+                                        } else {
+                                            format!("{}: {}", telemetry_variant, node_id)
+                                        };
+                                        telemetry_list.push((title, list));
+                                    }
+                                }
                             }
                         }
                     }
 
                     if telemetry_list.len() != 0 {
-                        telemetry.ui(ui, "Temperature", start_datetime, telemetry_list)
+                        telemetry.ui(ui, start_datetime, telemetry_list)
                     } else {
-                        ui.label("No telemetry data available");
+                        ui.label("Select a telemetry on left panel to display");
                     }
                 });
             }
