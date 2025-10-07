@@ -61,8 +61,11 @@ impl TryFrom<&str> for NodeId {
     type Error = num::ParseIntError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        let hex_part = s.strip_prefix('!').map_or(s, |v| v);
+        if s == "^all" {
+            return Ok(NodeId::broadcast());
+        }
 
+        let hex_part = s.strip_prefix('!').map_or(s, |v| v);
         let value = u32::from_str_radix(hex_part, 16)?;
         Ok(NodeId(value))
     }
@@ -90,7 +93,11 @@ impl From<NodeId> for u32 {
 
 impl fmt::Display for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "!{:08x}", self.0)
+        if self == &Self::broadcast() {
+            write!(f, "^all")
+        } else {
+            write!(f, "!{:08x}", self.0)
+        }
     }
 }
 
