@@ -4,7 +4,7 @@ use meshtastic_connect::{
     meshtastic,
 };
 use prost::Message;
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use super::byte_node_id::ByteNodeId;
 
@@ -175,7 +175,7 @@ pub struct PowerMetrics {
     current: f32,
 }
 
-#[derive(serde::Deserialize, serde::Serialize, PartialEq, Eq, Hash)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum TelemetryVariant {
     BarometricPressure,
     Temperature,
@@ -188,6 +188,26 @@ pub enum TelemetryVariant {
     PowerMetricVoltage(usize),
     // power metric with channel no (1-3)
     PowerMetricCurrent(usize),
+}
+
+impl Display for TelemetryVariant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TelemetryVariant::BarometricPressure => write!(f, "Pressure"),
+            TelemetryVariant::Temperature => write!(f, "Temperature"),
+            TelemetryVariant::Lux => write!(f, "Lux"),
+            TelemetryVariant::Iaq => write!(f, "Iaq"),
+            TelemetryVariant::Humidity => write!(f, "Humidity"),
+            TelemetryVariant::GasResistance => write!(f, "Gas Resistance"),
+            TelemetryVariant::Radiation => write!(f, "Radiation"),
+            TelemetryVariant::PowerMetricVoltage(channel) => {
+                write!(f, "Voltage ch. {}", channel)
+            }
+            TelemetryVariant::PowerMetricCurrent(channel) => {
+                write!(f, "Current ch. {}", channel)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, PartialOrd)]
@@ -226,26 +246,33 @@ pub struct NodePacket {
     pub hop_limit: u32,
 }
 
+#[derive(Default, serde::Deserialize, serde::Serialize, PartialEq)]
+pub struct NodeInfoExtended {
+    pub timestamp: DateTime<Utc>,
+    pub announced_node_id: String,
+    pub long_name: String,
+    pub short_name: String,
+    pub pkey: Option<Key>,
+}
+
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct NodeInfo {
-    pub name: Option<String>,
-    pub short_name: Option<String>,
     pub node_id: NodeId,
-    pub pkey: Option<Key>,
+    pub extended_info_history: Vec<NodeInfoExtended>,
     pub position: Vec<Position>,
     pub telemetry: HashMap<TelemetryVariant, Vec<NodeTelemetry>>,
     pub packet_statistics: Vec<NodePacket>,
 }
 
 macro_rules! push_statistic {
-    ($list:expr, $timestamp:expr, $packet:expr) => {
+    ($list:expr, $packet:expr) => {
         if !$list.is_empty() {
             for (i, v) in $list.iter().rev().enumerate() {
                 if v == &$packet {
                     break;
                 }
 
-                if $timestamp > v.timestamp {
+                if $packet.timestamp > v.timestamp {
                     $list.insert($list.len() - i, $packet);
                     break;
                 }
@@ -269,7 +296,7 @@ impl NodeInfo {
         };
         let list = self.telemetry.entry(telemetry_variant).or_default();
 
-        push_statistic!(list, timestamp, telemetry);
+        push_statistic!(list, telemetry);
     }
 
     fn update_using_data(
@@ -307,11 +334,22 @@ impl NodeInfo {
             meshtastic::PortNum::NodeinfoApp => {
                 let user =
                     meshtastic::User::decode(data.payload.as_slice()).map_err(|e| e.to_string())?;
-                self.name = Some(user.long_name);
-                self.short_name = Some(user.short_name);
-                if user.public_key.len() > 0 {
-                    self.pkey = Some(Key::try_from(user.public_key)?);
-                }
+
+                let pkey = if user.public_key.len() > 0 {
+                    Some(Key::try_from(user.public_key)?)
+                } else {
+                    None
+                };
+
+                let node_info_extended = NodeInfoExtended {
+                    timestamp: stored_timestamp,
+                    announced_node_id: user.id.clone(),
+                    long_name: user.long_name,
+                    short_name: user.short_name,
+                    pkey,
+                };
+
+                push_statistic!(self.extended_info_history, node_info_extended);
             }
             meshtastic::PortNum::TelemetryApp => {
                 let telemetry = meshtastic::Telemetry::decode(data.payload.as_slice())
@@ -475,6 +513,6 @@ impl NodeInfo {
             hop_limit: stored_mesh_packet.header.hop_limit,
         };
 
-        push_statistic!(self.packet_statistics, timestamp, packet);
+        push_statistic!(self.packet_statistics, packet);
     }
 }

@@ -56,7 +56,6 @@ impl Telemetry {
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
-        title: &str,
         start_time: DateTime<Utc>,
         telemetry: Vec<(String, &Vec<NodeTelemetry>)>,
     ) {
@@ -71,8 +70,8 @@ impl Telemetry {
             egui_plot::AxisHints::new_x().formatter(|a, b| tf.format(a, b)),
         ];
 
-        let legend_plot = egui_plot::Plot::new(title)
-            .legend(egui_plot::Legend::default().title(title))
+        let legend_plot = egui_plot::Plot::new("telemetry_plot")
+            .legend(egui_plot::Legend::default().follow_insertion_order(true))
             .custom_x_axes(x_axes)
             .x_grid_spacer(Self::x_grid)
             .label_formatter(|a, b| lf.format(a, b))
