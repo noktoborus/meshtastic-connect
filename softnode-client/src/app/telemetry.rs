@@ -58,6 +58,8 @@ impl Telemetry {
         ui: &mut egui::Ui,
         start_time: DateTime<Utc>,
         telemetry: Vec<(String, &Vec<NodeTelemetry>)>,
+        draw_as_points: bool,
+        title: Option<String>,
     ) {
         let basetime = self.base_datetime(start_time);
         let tf = TimeFormatter::new(basetime);
@@ -70,8 +72,15 @@ impl Telemetry {
             egui_plot::AxisHints::new_x().formatter(|a, b| tf.format(a, b)),
         ];
 
+        let legend = if let Some(title) = title {
+            egui_plot::Legend::default().title(title.as_str())
+        } else {
+            egui_plot::Legend::default()
+        }
+        .follow_insertion_order(true);
+
         let legend_plot = egui_plot::Plot::new("telemetry_plot")
-            .legend(egui_plot::Legend::default().follow_insertion_order(true))
+            .legend(legend)
             .custom_x_axes(x_axes)
             .x_grid_spacer(Self::x_grid)
             .label_formatter(|a, b| lf.format(a, b))
@@ -85,19 +94,17 @@ impl Telemetry {
                     .map(|v| {
                         [
                             ((v.timestamp.timestamp() - basetime.timestamp()) / 60) as f64,
-                            v.telemetry,
+                            v.value,
                         ]
                     })
                     .collect();
-                plot_ui.line(egui_plot::Line::new(title, points))
+
+                if draw_as_points {
+                    plot_ui.points(egui_plot::Points::new(title, points).radius(4.0).stems(0.0));
+                } else {
+                    plot_ui.line(egui_plot::Line::new(title, points))
+                }
             }
-            // for (title, node_telemetry) in telemetry.iter() {
-            //     let points: Vec<[f64; 2]> = node_telemetry
-            //         .iter()
-            //         .map(|v| [(v.timestamp - basetime).as_seconds_f64(), 0.0])
-            //         .collect();
-            //     plot_ui.line(egui_plot::Line::new(title, points))
-            // }
         });
     }
 }

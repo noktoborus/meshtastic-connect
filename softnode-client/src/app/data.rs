@@ -213,7 +213,7 @@ impl Display for TelemetryVariant {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, PartialOrd)]
 pub struct NodeTelemetry {
     pub timestamp: DateTime<Utc>,
-    pub telemetry: f64,
+    pub value: f64,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -292,7 +292,7 @@ impl NodeInfo {
     ) {
         let telemetry = NodeTelemetry {
             timestamp,
-            telemetry,
+            value: telemetry,
         };
         let list = self.telemetry.entry(telemetry_variant).or_default();
 
