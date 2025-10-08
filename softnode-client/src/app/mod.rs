@@ -6,7 +6,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Duration, Local, Utc};
 use data::{NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
-use egui::mutex::Mutex;
+use egui::{Color32, RichText, mutex::Mutex};
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;
@@ -183,13 +183,15 @@ impl SoftNodeApp {
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 struct ListPanel {
     telemetry_enabled_for: HashMap<TelemetryVariant, Vec<NodeId>>,
+    filter: String,
 }
 
 impl ListPanel {
     fn ui(
         &mut self,
         ctx: &egui::Context,
-        nodes: Vec<&NodeInfo>,
+        mut nodes: Vec<&NodeInfo>,
+        node_selected: Option<NodeId>,
         is_telemetry_page: bool,
     ) -> Option<Panel> {
         let mut next_page = None;
@@ -199,8 +201,31 @@ impl ListPanel {
             .min_width(200.0)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::TextEdit::singleline(&mut self.filter)
+                        .hint_text("Search note by id or name")
+                        .show(ui);
                     ui.vertical(|ui| {
+                        nodes.sort_by_key(|node_info| node_info.node_id);
                         for node_info in nodes {
+                            if !self.filter.is_empty() {
+                                let mut skip = true;
+                                if node_info.node_id.to_string().contains(self.filter.as_str()) {
+                                    skip = false;
+                                }
+                                if let Some(extended_info) = node_info.extended_info_history.last()
+                                {
+                                    if extended_info.short_name.contains(self.filter.as_str()) {
+                                        skip = false;
+                                    }
+                                    if extended_info.long_name.contains(self.filter.as_str()) {
+                                        skip = false;
+                                    }
+                                }
+                                if skip {
+                                    continue;
+                                }
+                            }
+
                             let telemetry_variants = is_telemetry_page.then(|| {
                                 node_info
                                     .telemetry
@@ -216,13 +241,28 @@ impl ListPanel {
                                 }
                             }
                             ui.separator();
+
                             if let Some(extended) = node_info.extended_info_history.last() {
                                 let node_id_str = node_info.node_id.to_string();
-                                if node_id_str.ends_with(extended.short_name.as_str()) {
-                                    ui.heading(node_id_str);
-                                } else {
-                                    ui.heading(format!("{} {}", node_id_str, extended.short_name));
-                                }
+                                ui.horizontal(|ui| {
+                                    if node_selected
+                                        .map(|v| v == node_info.node_id)
+                                        .unwrap_or(false)
+                                    {
+                                        ui.heading(
+                                            RichText::new("➧")
+                                                .color(Color32::from_rgb(0, 153, 255)),
+                                        );
+                                    }
+                                    if node_id_str.ends_with(extended.short_name.as_str()) {
+                                        ui.heading(node_id_str);
+                                    } else {
+                                        ui.heading(format!(
+                                            "{} {}",
+                                            node_id_str, extended.short_name
+                                        ));
+                                    }
+                                });
                                 if extended.long_name.len() > 0 {
                                     ui.label(extended.long_name.clone());
                                 }
@@ -278,13 +318,13 @@ impl SoftNodeApp {
 
         match &mut self.persistent.active_panel {
             Panel::Journal(journal) => {
-                if let Some(next_panel) = list_panel.ui(ctx, nodes_list, false) {
+                if let Some(next_panel) = list_panel.ui(ctx, nodes_list, None, false) {
                     return Some(next_panel);
                 }
                 egui::CentralPanel::default().show(ctx, |ui| journal.ui(ui));
             }
             Panel::Telemetry(telemetry) => {
-                if let Some(next_panel) = list_panel.ui(ctx, nodes_list, true) {
+                if let Some(next_panel) = list_panel.ui(ctx, nodes_list, None, true) {
                     return Some(next_panel);
                 }
                 egui::CentralPanel::default().show(ctx, |ui| {
@@ -338,7 +378,7 @@ impl SoftNodeApp {
                 let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                 let mut telemetry_list = Vec::new();
 
-                if let Some(next_panel) = list_panel.ui(ctx, nodes_list, false) {
+                if let Some(next_panel) = list_panel.ui(ctx, nodes_list, Some(*node_id), false) {
                     return Some(next_panel);
                 }
 
