@@ -200,10 +200,10 @@ impl ListPanel {
             .default_width(300.0)
             .min_width(200.0)
             .show(ctx, |ui| {
+                egui::TextEdit::singleline(&mut self.filter)
+                    .hint_text("Search note by id or name")
+                    .show(ui);
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    egui::TextEdit::singleline(&mut self.filter)
-                        .hint_text("Search note by id or name")
-                        .show(ui);
                     ui.vertical(|ui| {
                         nodes.sort_by_key(|node_info| node_info.node_id);
                         for node_info in nodes {
