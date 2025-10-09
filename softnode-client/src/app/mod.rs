@@ -7,7 +7,10 @@ use std::{collections::HashMap, sync::Arc};
 use chrono::{DateTime, Duration, Local, Utc};
 use data::{NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
 use egui::{Color32, RichText, mutex::Mutex};
-use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
+use meshtastic_connect::keyring::{
+    Keyring,
+    node_id::{self, NodeId},
+};
 use settings::Settings;
 use telemetry::Telemetry;
 
@@ -16,7 +19,8 @@ enum Panel {
     Journal(Journal),
     Telemetry(Telemetry),
     Settings(Settings),
-    Gateways(NodeId, Telemetry),
+    Rssi(NodeId, Telemetry),
+    Gateways(Option<NodeId>, Telemetry),
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
@@ -127,6 +131,18 @@ impl SoftNodeApp {
 
                     let stored_mesh_packet = stored_mesh_packet.decrypt(&self.persistent.keyring);
 
+                    if let Some(gateway_id) = stored_mesh_packet.gateway {
+                        let gateway_entry =
+                            self.nodes
+                                .entry(gateway_id)
+                                .or_insert_with(|| data::NodeInfo {
+                                    node_id: gateway_id,
+                                    ..Default::default()
+                                });
+
+                        gateway_entry.update_as_gateway(&stored_mesh_packet);
+                    }
+
                     let entry = self.nodes.entry(node_id).or_insert_with(|| data::NodeInfo {
                         node_id,
                         ..Default::default()
@@ -180,6 +196,12 @@ impl SoftNodeApp {
     }
 }
 
+enum ListPanelFilter {
+    None,
+    Telemetry,
+    Gateway,
+}
+
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 struct ListPanel {
     telemetry_enabled_for: HashMap<TelemetryVariant, Vec<NodeId>>,
@@ -192,7 +214,7 @@ impl ListPanel {
         ctx: &egui::Context,
         mut nodes: Vec<&NodeInfo>,
         node_selected: Option<NodeId>,
-        is_telemetry_page: bool,
+        filter_by: ListPanelFilter,
     ) -> Option<Panel> {
         let mut next_page = None;
         egui::SidePanel::left("list_panel")
@@ -240,7 +262,20 @@ impl ListPanel {
                                 }
                             }
 
-                            let telemetry_variants = is_telemetry_page.then(|| {
+                            let mut show_and_filter_by_telemetry = false;
+                            match filter_by {
+                                ListPanelFilter::None => {}
+                                ListPanelFilter::Telemetry => {
+                                    show_and_filter_by_telemetry = true;
+                                }
+                                ListPanelFilter::Gateway => {
+                                    if node_info.gateway_for.is_empty() {
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            let telemetry_variants = show_and_filter_by_telemetry.then(|| {
                                 node_info
                                     .telemetry
                                     .iter()
@@ -284,10 +319,20 @@ impl ListPanel {
                                 ui.heading(node_info.node_id.to_string());
                             }
                             ui.add_space(5.0);
-                            if ui.button("RSSI").clicked() {
-                                next_page =
-                                    Some(Panel::Gateways(node_info.node_id, Default::default()));
-                            }
+                            ui.horizontal(|ui| {
+                                if ui.button("RSSI").clicked() {
+                                    next_page =
+                                        Some(Panel::Rssi(node_info.node_id, Default::default()));
+                                }
+                                if !node_info.gateway_for.is_empty() {
+                                    if ui.button("Gateway").clicked() {
+                                        next_page = Some(Panel::Gateways(
+                                            Some(node_info.node_id),
+                                            Default::default(),
+                                        ))
+                                    }
+                                }
+                            });
                             ui.add_space(5.0);
                             if let Some(telemetry_variants) = telemetry_variants {
                                 for telemetry_variant in telemetry_variants {
@@ -332,13 +377,17 @@ impl SoftNodeApp {
 
         match &mut self.persistent.active_panel {
             Panel::Journal(journal) => {
-                if let Some(next_panel) = list_panel.ui(ctx, nodes_list, None, false) {
+                if let Some(next_panel) =
+                    list_panel.ui(ctx, nodes_list, None, ListPanelFilter::None)
+                {
                     return Some(next_panel);
                 }
                 egui::CentralPanel::default().show(ctx, |ui| journal.ui(ui));
             }
             Panel::Telemetry(telemetry) => {
-                if let Some(next_panel) = list_panel.ui(ctx, nodes_list, None, true) {
+                if let Some(next_panel) =
+                    list_panel.ui(ctx, nodes_list, None, ListPanelFilter::Telemetry)
+                {
                     return Some(next_panel);
                 }
                 egui::CentralPanel::default().show(ctx, |ui| {
@@ -388,11 +437,13 @@ impl SoftNodeApp {
                     ctx.request_repaint();
                 }
             }
-            Panel::Gateways(node_id, telemetry) => {
+            Panel::Rssi(node_id, telemetry) => {
                 let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                 let mut telemetry_list = Vec::new();
 
-                if let Some(next_panel) = list_panel.ui(ctx, nodes_list, Some(*node_id), false) {
+                if let Some(next_panel) =
+                    list_panel.ui(ctx, nodes_list, Some(*node_id), ListPanelFilter::None)
+                {
                     return Some(next_panel);
                 }
 
@@ -476,6 +527,71 @@ impl SoftNodeApp {
                     });
                 }
             }
+            Panel::Gateways(gateway_id, telemetry) => {
+                if let Some(next_panel) =
+                    list_panel.ui(ctx, nodes_list, *gateway_id, ListPanelFilter::Gateway)
+                {
+                    return Some(next_panel);
+                }
+
+                if let Some(gateway_info) = gateway_id.map(|v| self.nodes.get(&v)).flatten() {
+                    let mut start_datetime = DateTime::<Utc>::MAX_UTC;
+                    let rssi = gateway_info
+                        .gateway_for
+                        .iter()
+                        .map(|(k, v)| {
+                            (
+                                k,
+                                v.iter()
+                                    .map(|v| {
+                                        start_datetime = v.timestamp.min(start_datetime);
+                                        NodeTelemetry {
+                                            timestamp: v.timestamp,
+                                            value: v
+                                                .rx_info
+                                                .as_ref()
+                                                .map(|v| v.rx_rssi as f64)
+                                                .unwrap_or(0.0),
+                                        }
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let rssi_with_refs: Vec<_> = rssi
+                        .iter()
+                        .map(|(node_id, v)| {
+                            (
+                                if let Some(extended_info) = self
+                                    .nodes
+                                    .get(node_id)
+                                    .map(|node_info| node_info.extended_info_history.last())
+                                    .flatten()
+                                {
+                                    format!("{} {}", node_id, extended_info.short_name)
+                                } else {
+                                    node_id.to_string()
+                                },
+                                v,
+                            )
+                        })
+                        .collect();
+
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        if rssi.len() != 0 {
+                            telemetry.ui(
+                                ui,
+                                start_datetime,
+                                rssi_with_refs,
+                                true,
+                                Some(format!("{} RSSI", gateway_id.unwrap())),
+                            )
+                        } else {
+                            ui.label("No data");
+                        }
+                    });
+                }
+            }
         };
         None
     }
@@ -521,6 +637,16 @@ impl eframe::App for SoftNodeApp {
                     .clicked()
                 {
                     self.persistent.active_panel = Panel::Telemetry(Telemetry {});
+                }
+
+                if ui
+                    .selectable_label(
+                        matches!(self.persistent.active_panel, Panel::Gateways(_, _)),
+                        "Gateways",
+                    )
+                    .clicked()
+                {
+                    self.persistent.active_panel = Panel::Gateways(None, Telemetry {});
                 }
             })
         });

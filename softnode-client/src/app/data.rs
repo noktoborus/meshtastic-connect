@@ -255,6 +255,13 @@ pub struct NodeInfoExtended {
     pub pkey: Option<Key>,
 }
 
+#[derive(serde::Deserialize, serde::Serialize, PartialEq)]
+pub struct GatewayInfo {
+    pub timestamp: DateTime<Utc>,
+    pub rx_info: Option<StoreMeshRxInfo>,
+    pub hop_limit: u32,
+}
+
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct NodeInfo {
     pub node_id: NodeId,
@@ -262,6 +269,7 @@ pub struct NodeInfo {
     pub position: Vec<Position>,
     pub telemetry: HashMap<TelemetryVariant, Vec<NodeTelemetry>>,
     pub packet_statistics: Vec<NodePacket>,
+    pub gateway_for: HashMap<NodeId, Vec<GatewayInfo>>,
 }
 
 macro_rules! push_statistic {
@@ -475,6 +483,23 @@ impl NodeInfo {
             _ => {}
         }
         Ok(data.portnum())
+    }
+
+    pub fn update_as_gateway(&mut self, stored_mesh_packet: &StoredMeshPacket) {
+        if self.node_id != stored_mesh_packet.header.from {
+            let gateway_info = GatewayInfo {
+                timestamp: stored_mesh_packet.store_timestamp,
+                rx_info: stored_mesh_packet.header.rx.clone(),
+                hop_limit: stored_mesh_packet.header.hop_limit,
+            };
+
+            let list = self
+                .gateway_for
+                .entry(stored_mesh_packet.header.from)
+                .or_insert(Default::default());
+
+            push_statistic!(list, gateway_info);
+        }
     }
 
     pub fn update(&mut self, stored_mesh_packet: &StoredMeshPacket) {
