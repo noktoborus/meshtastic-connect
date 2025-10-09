@@ -17,7 +17,6 @@ impl Telemetry {
     const SECS_PER_MIN: f64 = 60.0;
     const MINS_PER_DAY: f64 = 24.0 * 60.0;
     const MINS_PER_H: f64 = 60.0;
-    const TIME_SCALE: f32 = 10.0;
 
     fn x_grid(input: egui_plot::GridInput) -> Vec<egui_plot::GridMark> {
         // Note: this always fills all possible marks. For optimization, `input.bounds`
@@ -83,8 +82,7 @@ impl Telemetry {
             .legend(legend)
             .custom_x_axes(x_axes)
             .x_grid_spacer(Self::x_grid)
-            .label_formatter(|a, b| lf.format(a, b))
-            .data_aspect(Telemetry::TIME_SCALE);
+            .label_formatter(|a, b| lf.format(a, b));
 
         legend_plot.show(ui, |plot_ui| {
             // if let Some((title, node_telemetry)) = telemetry.first() {
