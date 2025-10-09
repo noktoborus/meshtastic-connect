@@ -2,7 +2,7 @@ pub mod byte_node_id;
 pub mod data;
 pub mod settings;
 mod telemetry;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, f32, sync::Arc};
 
 use chrono::{DateTime, Duration, Local, Utc};
 use data::{NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
@@ -420,7 +420,7 @@ impl SoftNodeApp {
                     }
 
                     if telemetry_list.len() != 0 {
-                        telemetry.ui(ui, start_datetime, telemetry_list, false, None)
+                        telemetry.ui(ui, start_datetime, telemetry_list, None, true, None)
                     } else {
                         ui.label("Select a telemetry on left panel to display");
                     }
@@ -447,6 +447,7 @@ impl SoftNodeApp {
                 if let Some(node_info) = &self.nodes.get(&node_id) {
                     // let mut snr = Vec::new();
                     let mut rssi = Vec::new();
+                    let mut max_rssi = f32::MIN;
                     // let mut snr_per_gw: HashMap<NodeId, Vec<NodeTelemetry>> = Default::default();
                     let mut rssi_per_gw: HashMap<NodeId, Vec<NodeTelemetry>> = Default::default();
 
@@ -457,9 +458,10 @@ impl SoftNodeApp {
                             //     timestamp: packet_info.timestamp,
                             //     value: rx_info.rx_snr as f64,
                             // };
+                            max_rssi = max_rssi.max(rx_info.rx_rssi as f32);
                             let rssi_telemetry = NodeTelemetry {
                                 timestamp: packet_info.timestamp,
-                                value: rx_info.rx_snr as f64,
+                                value: rx_info.rx_rssi as f64,
                             };
 
                             if let Some(gateway) = packet_info.gateway {
@@ -517,7 +519,14 @@ impl SoftNodeApp {
                                 format!("{}\nRSSI per gateways", node_id)
                             };
                         if telemetry_list.len() != 0 {
-                            telemetry.ui(ui, start_datetime, telemetry_list, true, Some(title))
+                            telemetry.ui(
+                                ui,
+                                start_datetime,
+                                telemetry_list,
+                                Some(title),
+                                false,
+                                Some(max_rssi),
+                            )
                         } else {
                             ui.label("No data");
                         }
@@ -533,6 +542,7 @@ impl SoftNodeApp {
 
                 if let Some(gateway_info) = gateway_id.map(|v| self.nodes.get(&v)).flatten() {
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
+                    let mut max_rssi = f32::MIN;
                     let rssi = gateway_info
                         .gateway_for
                         .iter()
@@ -547,7 +557,10 @@ impl SoftNodeApp {
                                             value: v
                                                 .rx_info
                                                 .as_ref()
-                                                .map(|v| v.rx_rssi as f64)
+                                                .map(|rx_info| {
+                                                    max_rssi = max_rssi.max(rx_info.rx_rssi as f32);
+                                                    rx_info.rx_rssi as f64
+                                                })
                                                 .unwrap_or(0.0),
                                         }
                                     })
@@ -580,8 +593,9 @@ impl SoftNodeApp {
                                 ui,
                                 start_datetime,
                                 rssi_with_refs,
-                                true,
                                 Some(format!("{} RSSI", gateway_id.unwrap())),
+                                false,
+                                Some(max_rssi),
                             )
                         } else {
                             ui.label("No data");

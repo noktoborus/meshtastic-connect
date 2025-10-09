@@ -1,10 +1,27 @@
 use chrono::{DateTime, NaiveTime, Utc};
+use egui::{Color32, epaint::Hsva};
+use egui_plot::PlotItem;
 use std::time::Duration;
 
 use super::data::NodeTelemetry;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Telemetry {}
+
+#[derive(Default)]
+struct ColorGenerator {
+    next_auto_color_idx: usize,
+}
+
+impl ColorGenerator {
+    fn next_color(&mut self) -> Color32 {
+        let i = self.next_auto_color_idx;
+        self.next_auto_color_idx += 1;
+        let golden_ratio = (5.0_f32.sqrt() - 1.0) / 2.0; // 0.61803398875
+        let h = i as f32 * golden_ratio;
+        Hsva::new(h, 0.85, 0.5, 1.0).into() // TODO(emilk): OkLab or some other perspective color space
+    }
+}
 
 impl Telemetry {
     fn base_datetime(&self, start_time: DateTime<Utc>) -> DateTime<Utc> {
@@ -57,9 +74,11 @@ impl Telemetry {
         ui: &mut egui::Ui,
         start_time: DateTime<Utc>,
         telemetry: Vec<(String, &Vec<NodeTelemetry>)>,
-        draw_as_points: bool,
         title: Option<String>,
+        draw_line: bool,
+        stem_base: Option<f32>,
     ) {
+        let mut color_generator: ColorGenerator = Default::default();
         let basetime = self.base_datetime(start_time);
         let tf = TimeFormatter::new(basetime);
         let lf = LabelFormatter::new(basetime);
@@ -97,10 +116,21 @@ impl Telemetry {
                     })
                     .collect();
 
-                if draw_as_points {
-                    plot_ui.points(egui_plot::Points::new(title, points).radius(4.0).stems(0.0));
+                let color = color_generator.next_color();
+
+                let mut plot_points = egui_plot::Points::new(title, points.clone())
+                    .radius(4.0)
+                    .color(color);
+                if let Some(average) = stem_base {
+                    plot_points = plot_points.stems(average);
+                }
+                if draw_line {
+                    let id = PlotItem::id(&plot_points);
+                    let color = PlotItem::color(&plot_points);
+                    plot_ui.points(plot_points);
+                    plot_ui.line(egui_plot::Line::new(title, points).id(id).color(color));
                 } else {
-                    plot_ui.line(egui_plot::Line::new(title, points))
+                    plot_ui.points(plot_points);
                 }
             }
         });
