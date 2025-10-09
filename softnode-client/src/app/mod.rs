@@ -208,16 +208,30 @@ impl ListPanel {
                         nodes.sort_by_key(|node_info| node_info.node_id);
                         for node_info in nodes {
                             if !self.filter.is_empty() {
+                                let filter = self.filter.to_uppercase();
                                 let mut skip = true;
-                                if node_info.node_id.to_string().contains(self.filter.as_str()) {
+                                if node_info
+                                    .node_id
+                                    .to_string()
+                                    .to_uppercase()
+                                    .contains(filter.as_str())
+                                {
                                     skip = false;
                                 }
                                 if let Some(extended_info) = node_info.extended_info_history.last()
                                 {
-                                    if extended_info.short_name.contains(self.filter.as_str()) {
+                                    if extended_info
+                                        .short_name
+                                        .to_uppercase()
+                                        .contains(filter.as_str())
+                                    {
                                         skip = false;
                                     }
-                                    if extended_info.long_name.contains(self.filter.as_str()) {
+                                    if extended_info
+                                        .long_name
+                                        .to_uppercase()
+                                        .contains(filter.as_str())
+                                    {
                                         skip = false;
                                     }
                                 }
