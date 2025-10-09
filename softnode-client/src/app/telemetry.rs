@@ -152,9 +152,9 @@ impl LabelFormatter {
         let str_datetime = datetime.format("%d/%m/%Y %H:%M");
 
         if s.is_empty() {
-            format!("{}", str_datetime)
+            format!("{:.2}\n{}", point.y, str_datetime)
         } else {
-            format!("{}\n{}", s, str_datetime)
+            format!("{:.2}\n{}\n{}", point.y, s, str_datetime)
         }
     }
 }
