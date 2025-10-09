@@ -152,10 +152,7 @@ impl TimeFormatter {
         }
 
         let minutes = mark.value;
-        if !(0.0..5.0 * Telemetry::MINS_PER_DAY).contains(&minutes) {
-            // No labels outside value bounds
-            String::new()
-        } else if is_approx_integer(minutes / Telemetry::MINS_PER_DAY) {
+        if is_approx_integer(minutes / Telemetry::MINS_PER_DAY) {
             let seconds = minutes * Telemetry::SECS_PER_MIN;
             let datetime = self.start_time + Duration::from_secs(seconds as u64);
 
