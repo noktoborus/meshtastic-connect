@@ -7,10 +7,7 @@ use std::{collections::HashMap, sync::Arc};
 use chrono::{DateTime, Duration, Local, Utc};
 use data::{NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
 use egui::{Color32, RichText, mutex::Mutex};
-use meshtastic_connect::keyring::{
-    Keyring,
-    node_id::{self, NodeId},
-};
+use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;
 
