@@ -317,9 +317,13 @@ impl ListPanel {
                             }
                             ui.add_space(5.0);
                             ui.horizontal(|ui| {
-                                if ui.button("RSSI").clicked() {
-                                    next_page =
-                                        Some(Panel::Rssi(node_info.node_id, Default::default()));
+                                if !node_info.packet_statistics.is_empty() {
+                                    if ui.button("RSSI").clicked() {
+                                        next_page = Some(Panel::Rssi(
+                                            node_info.node_id,
+                                            Default::default(),
+                                        ));
+                                    }
                                 }
                                 if !node_info.gateway_for.is_empty() {
                                     if ui.button("Gateway").clicked() {
