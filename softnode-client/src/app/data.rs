@@ -487,9 +487,24 @@ impl NodeInfo {
 
     pub fn update_as_gateway(&mut self, stored_mesh_packet: &StoredMeshPacket) {
         if self.node_id != stored_mesh_packet.header.from {
+            let rx_info = if let Some(rx_info) = &stored_mesh_packet.header.rx {
+                if rx_info.rx_rssi > RSSI_UPPER_THRESHOLD || rx_info.rx_rssi < RSSI_LOWER_THRESHOLD
+                {
+                    None
+                } else if rx_info.rx_snr > SNR_UPPER_THRESHOLD
+                    || rx_info.rx_snr < SNR_LOWER_THRESHOLD
+                {
+                    None
+                } else {
+                    Some(rx_info.clone())
+                }
+            } else {
+                None
+            };
+
             let gateway_info = GatewayInfo {
                 timestamp: stored_mesh_packet.store_timestamp,
-                rx_info: stored_mesh_packet.header.rx.clone(),
+                rx_info,
                 hop_limit: stored_mesh_packet.header.hop_limit,
             };
 
@@ -527,6 +542,13 @@ impl NodeInfo {
             // self.push_telemetry(timestamp, TelemetryVariant::EmptyPackets, 1);
         };
 
+        if let Some(gateway) = stored_mesh_packet.gateway {
+            if gateway == stored_mesh_packet.header.from {
+                // RSSI and SNR is always 0 for node's messages if it gateway for himself
+                return;
+            }
+        }
+
         let packet = NodePacket {
             timestamp,
             packet_type,
@@ -541,3 +563,8 @@ impl NodeInfo {
         push_statistic!(self.packet_statistics, packet);
     }
 }
+
+const RSSI_UPPER_THRESHOLD: i32 = 50;
+const RSSI_LOWER_THRESHOLD: i32 = -200;
+const SNR_UPPER_THRESHOLD: f32 = 30.0;
+const SNR_LOWER_THRESHOLD: f32 = -200.0;
