@@ -168,15 +168,15 @@ impl SoftNodeApp {
             }
             UpdateState::IdleSince(start_time) => {
                 // TODO: use settings' option for standalone and relative for web
-                const API_ADDRESS: &str = "http://a.styxheim.ru:4881/api/softnode/sync";
+                let api_url = format!("{}{}", env!("SOFTNODE_API_URL_BASE"), "/sync");
                 let elapsed = Local::now().signed_duration_since(start_time);
 
                 if elapsed >= self.persistent.update_interval_secs {
                     let ctx = ctx.clone();
                     let request = if let Some(sync_point) = self.last_sync_point {
-                        ehttp::Request::get(format!("{}?start={}", API_ADDRESS, sync_point))
+                        ehttp::Request::get(format!("{}?start={}", api_url, sync_point))
                     } else {
-                        ehttp::Request::get(API_ADDRESS)
+                        ehttp::Request::get(api_url)
                     };
 
                     *downloads = UpdateState::InProgress;

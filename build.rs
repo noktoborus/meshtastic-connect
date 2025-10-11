@@ -46,7 +46,7 @@ fn main() {
             .unwrap();
 
         for proto in &protos_paths {
-            println!("cargo:rerun-if-changed={}", proto.display());
+            println!("cargo::rerun-if-changed={}", proto.display());
         }
     }
 }
