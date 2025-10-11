@@ -11,12 +11,38 @@ use cryptor::{Cryptor, pki::PKI, symmetric::Symmetric};
 use key::{K256, Key};
 use node_id::NodeId;
 use peer::Peer;
+use serde::{Deserialize, Serialize};
 
-#[derive(Default, Debug, Clone, serde::Deserialize, serde::Serialize)]
+fn serialize_peers<S>(peers: &HashMap<NodeId, Peer>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut list = peers.values().collect::<Vec<_>>();
+    list.sort_by_key(|peer| peer.node_id);
+    Vec::serialize(&list, serializer)
+}
+
+fn deserialize_peers<'de, D>(deserializer: D) -> Result<HashMap<NodeId, Peer>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let list: Vec<Peer> = Vec::deserialize(deserializer)?;
+    let mut peers = HashMap::new();
+    for peer in list {
+        peers.insert(peer.node_id, peer);
+    }
+    Ok(peers)
+}
+
+#[derive(Default, Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 pub struct Keyring {
     #[serde(rename = "Channels")]
     channels: Vec<Channel>,
-    #[serde(rename = "Peers")]
+    #[serde(
+        rename = "Peers",
+        serialize_with = "serialize_peers",
+        deserialize_with = "deserialize_peers"
+    )]
     peers: HashMap<NodeId, Peer>,
 }
 
@@ -26,22 +52,19 @@ impl Keyring {
     }
 
     pub fn add_channel(&mut self, name: &str, key: Key) -> Result<(), String> {
-        let channel = Channel::new(name, key)?;
-        println!("init channel {}", channel);
+        let channel = Channel::new(name, key);
         self.channels.push(channel);
         Ok(())
     }
 
     pub fn add_peer(&mut self, node_id: NodeId, secret_key: K256) -> Result<(), String> {
         let peer = Peer::new(node_id, secret_key)?;
-        println!("init peer {}", peer);
         self.peers.entry(node_id).or_insert(peer);
         Ok(())
     }
 
     pub fn add_remote_peer(&mut self, node_id: NodeId, public_key: K256) -> Result<(), String> {
         let peer = Peer::new_remote_peer(node_id, public_key)?;
-        println!("init remote peer {}", peer);
         self.peers.entry(node_id).or_insert(peer);
         Ok(())
     }
@@ -113,5 +136,48 @@ impl Keyring {
         } else {
             self.cryptor_for_channel(from, channel)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Keyring, key::Key};
+    use pretty_assertions::assert_eq;
+
+    fn build_test_keyring() -> Keyring {
+        let mut keyring = Keyring::new();
+
+        keyring
+            .add_channel("Channel1", Key::K128(Default::default()))
+            .unwrap();
+        keyring
+            .add_channel("Channel2", Key::K256(Default::default()))
+            .unwrap();
+
+        keyring
+            .add_peer(0xdeadbeef.into(), Default::default())
+            .unwrap();
+        keyring
+            .add_remote_peer(0xbbbbaaaa.into(), Default::default())
+            .unwrap();
+        keyring
+    }
+
+    #[test]
+    fn yaml_serialize_and_deserialize() {
+        let se_keyring = build_test_keyring();
+        let yaml = serde_yaml_ng::to_string(&se_keyring).unwrap();
+        let de_keyring = serde_yaml_ng::from_str(&yaml).unwrap();
+
+        assert_eq!(se_keyring, de_keyring);
+    }
+
+    #[test]
+    fn ron_serialize_and_deserialize() {
+        let se_keyring = build_test_keyring();
+        let ron_data = ron::ser::to_string(&se_keyring).unwrap();
+        let de_keyring = ron::de::from_str(&ron_data).unwrap();
+
+        assert_eq!(se_keyring, de_keyring);
     }
 }

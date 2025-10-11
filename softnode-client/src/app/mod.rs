@@ -94,7 +94,16 @@ impl PersistentData {
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
         if let Some(storage) = cc.storage {
-            eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
+            match eframe::get_value(storage, eframe::APP_KEY) {
+                Some(value) => {
+                    log::info!("Loading previous app state");
+                    value
+                }
+                None => {
+                    log::info!("Generate default app state");
+                    Default::default()
+                }
+            }
         } else {
             Default::default()
         }

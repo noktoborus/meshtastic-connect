@@ -1,14 +1,32 @@
 use super::key::Key;
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, serde::Serialize, Eq, Hash)]
 pub struct Channel {
     #[serde(rename = "Name")]
     pub name: String,
     #[serde(rename = "SharedKey")]
     pub key: Key,
-    #[serde(rename = "ChannelHash")]
+    #[serde(skip)]
     pub channel_hash: u32,
+}
+
+impl<'de> serde::Deserialize<'de> for Channel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct ChannelHelper {
+            #[serde(rename = "Name")]
+            name: String,
+            #[serde(rename = "SharedKey")]
+            key: Key,
+        }
+
+        ChannelHelper::deserialize(deserializer)
+            .map(|helper| Channel::new(&helper.name, helper.key))
+    }
 }
 
 impl fmt::Display for Channel {
@@ -18,14 +36,14 @@ impl fmt::Display for Channel {
 }
 
 impl Channel {
-    pub fn new(name: &str, key: Key) -> Result<Self, String> {
+    pub fn new(name: &str, key: Key) -> Self {
         let chan_no = Self::generate_hash(name, key.as_bytes()) as u32;
 
-        Ok(Self {
+        Self {
             name: name.to_string(),
             key,
             channel_hash: chan_no,
-        })
+        }
     }
 
     fn xor_hash(data: &[u8]) -> u8 {

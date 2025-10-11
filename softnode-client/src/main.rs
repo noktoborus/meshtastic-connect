@@ -5,7 +5,9 @@ use softnode_client::app::SoftNodeApp;
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
-    env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+    use env_logger::Env;
+
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

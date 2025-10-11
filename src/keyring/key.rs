@@ -5,13 +5,13 @@ use serde::ser::{Serialize, Serializer};
 use std::fmt;
 use x25519_dalek::{PublicKey, StaticSecret};
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash)]
 pub struct K128(pub [u8; 16]);
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash)]
 pub struct K256(pub [u8; 32]);
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash)]
 pub enum Key {
     K128(K128),
     K256(K256),
