@@ -273,11 +273,21 @@ impl Default for SoftNodeTransport {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub(crate) struct TlsAcme {
+    pub(crate) emails: Vec<String>,
+    pub(crate) domains: Vec<String>,
+    pub(crate) cache_dir: String,
+    pub(crate) is_prod: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct WebConfig {
     pub(crate) enabled: bool,
     pub(crate) http_listen: SocketAddr,
     // Serve this bundle on http's socket
     pub(crate) serve_dir: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tls_acme: Option<TlsAcme>,
 }
 
 impl Default for WebConfig {
@@ -286,6 +296,7 @@ impl Default for WebConfig {
             enabled: false,
             http_listen: "127.0.0.1:8080".parse().unwrap(),
             serve_dir: "./web/".to_string(),
+            tls_acme: None,
         }
     }
 }

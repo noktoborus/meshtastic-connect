@@ -237,15 +237,10 @@ async fn main() {
     if web_config.enabled {
         println!("Webserver on {}...", web_config.http_listen);
         web::init();
+        let web_sqlite = sqlite.clone();
+
+        tokio::spawn(async move { web::start(web_config.clone(), web_sqlite).await });
     }
-    let web_sqlite = sqlite.clone();
-    let web_server_future = async || {
-        if web_config.enabled {
-            Some(web::start(web_config.clone(), web_sqlite).await)
-        } else {
-            None
-        }
-    };
 
     let mut keyring = Keyring::new();
 
@@ -283,15 +278,6 @@ async fn main() {
             _ = sleep_until(next_wakeup) => {
                 handle_timer_event(&sqlite, &mut schedule, &soft_node, &keyring, &mut router).await;
             },
-            Some(result) = web_server_future.clone()() => {
-                match result {
-                    Ok(()) => {}
-                    Err(err) => {
-                        println!("handle web error: {}", err);
-                        exit(1);
-                    }
-                }
-            }
             result = router.recv_mesh() => {
                 match result {
                     Ok(recv_capsule) => { handle_network_event(&sqlite, &keyring, &mut router, recv_capsule).await; }

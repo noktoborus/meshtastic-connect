@@ -3,6 +3,10 @@ use std::sync::Arc;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::{Json, Router, routing};
+use futures::StreamExt;
+use rustls_acme::AcmeConfig;
+use rustls_acme::axum::AxumAcceptor;
+use rustls_acme::caches::DirCache;
 use serde::Deserialize;
 use tower_http::cors;
 use tower_http::services::ServeDir;
@@ -60,6 +64,17 @@ pub(crate) async fn start(config: WebConfig, sqlite: SQLite) -> Result<(), std::
         .allow_origin(cors::Any)
         .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
         .allow_headers([axum::http::header::CONTENT_TYPE]);
+    let acme = if let Some(acme) = config.tls_acme {
+        let acme_state = AcmeConfig::new(acme.domains)
+            .contact(acme.emails.iter().map(|e| format!("mailto:{}", e)))
+            .cache(DirCache::new(acme.cache_dir))
+            .directory_lets_encrypt(acme.is_prod)
+            .state();
+
+        Some(acme_state)
+    } else {
+        None
+    };
 
     let app = Router::new()
         .fallback_service(ServeDir::new(config.serve_dir))
@@ -74,7 +89,25 @@ pub(crate) async fn start(config: WebConfig, sqlite: SQLite) -> Result<(), std::
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 
-    axum_server::bind(config.http_listen.into())
-        .serve(app.into_make_service())
-        .await
+    if let Some(mut acme_state) = acme {
+        let acceptor = acme_state.axum_acceptor(acme_state.default_rustls_config());
+
+        tokio::spawn(async move {
+            loop {
+                match acme_state.next().await.unwrap() {
+                    Ok(ok) => println!("tlsacme event: {:?}", ok),
+                    Err(err) => println!("tlsacme error: {:?}", err),
+                }
+            }
+        });
+
+        axum_server::bind(config.http_listen.into())
+            .acceptor(acceptor)
+            .serve(app.into_make_service())
+            .await
+    } else {
+        axum_server::bind(config.http_listen.into())
+            .serve(app.into_make_service())
+            .await
+    }
 }
