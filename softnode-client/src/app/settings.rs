@@ -56,7 +56,7 @@ impl Settings {
                     #[cfg(target_arch = "wasm32")]
                     ui.label("Ключи не передаются на сервер, а хранятся в браузере в локальном хранилище в открытом виде.");
 
-                    ui.label("При приминении ключей, все сообщения будут обновлены");
+                    ui.label("При применении ключей, все сообщения будут обновлены");
 
                     static KEYRING_YAML: LazyLock<String> = LazyLock::new(|| {
                         let mut example_keyring = Keyring::new();
