@@ -35,7 +35,7 @@ jobs:
           version: "latest"
 
       - name: Build the Rust WASM app and all of its assets
-        run: cd softnode-client && SOFTNODE_API_URL_BASE="http://a.styxheim.ru:4881/api/softnode" trunk build --public-url ${{ github.event.repository.name }} --release
+        run: cd softnode-client && SOFTNODE_API_URL_BASE="http://a.styxheim.ru:4881/api/softnode" trunk build --public-url . --release
 
       - name: Setup Pages
         uses: actions/configure-pages@v5.0.0
