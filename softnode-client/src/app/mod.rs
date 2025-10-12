@@ -444,6 +444,7 @@ impl SoftNodeApp {
                 if settings.ui(ctx, &mut self.persistent.keyring) {
                     self.last_sync_point = None;
                     self.nodes.clear();
+                    self.journal.clear();
                     self.persistent.active_panel = Panel::Journal(Journal {});
                     ctx.request_repaint();
                 }
