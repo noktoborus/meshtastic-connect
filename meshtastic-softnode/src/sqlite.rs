@@ -4,7 +4,7 @@ use meshtastic_connect::{keyring::node_id::NodeId, meshtastic};
 use prost::Message;
 use softnode_client::app::{
     byte_node_id::ByteNodeId,
-    data::{DataVariant, StoreMeshRxInfo, StoredMeshHeader, StoredMeshPacket},
+    data::{DataVariant, DecryptTarget, StoreMeshRxInfo, StoredMeshHeader, StoredMeshPacket},
 };
 use tokio_rusqlite::{Connection, params};
 
@@ -81,7 +81,7 @@ impl SQLite {
                             if portnum.is_some() {
                                 let data = meshtastic::Data::decode(data.as_slice())
                                     .map_err(|e| rusqlite::Error::ModuleError(e.to_string()))?;
-                                Some(DataVariant::Decrypted(data))
+                                Some(DataVariant::Decrypted(DecryptTarget::Direct(row.get(4)?), data))
                             } else {
                                 Some(DataVariant::Encrypted(data))
                             }

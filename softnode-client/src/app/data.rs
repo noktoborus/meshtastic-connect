@@ -9,47 +9,124 @@ use std::{collections::HashMap, fmt::Display};
 use super::byte_node_id::ByteNodeId;
 
 pub struct JournalData {
-    port_num: meshtastic::PortNum,
-    hint: String,
+    pub timestamp: DateTime<Utc>,
+    pub id: u32,
+    pub from: NodeId,
+    pub to: String,
+    pub gateway: Option<NodeId>,
+    pub relay: ByteNodeId,
+    pub message_type: String,
+    pub message_hint: String,
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
-struct JournalDataSerdeHelper<'a> {
-    port_num: &'a str,
-    hint: &'a str,
-}
+impl From<StoredMeshPacket> for JournalData {
+    fn from(stored_mesh_packet: StoredMeshPacket) -> Self {
+        let message_type;
+        let message_hint;
+        let mut to = stored_mesh_packet.header.to.into();
 
-impl serde::Serialize for JournalData {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let helper = JournalDataSerdeHelper {
-            port_num: self.port_num.as_str_name(),
-            hint: self.hint.as_str(),
+        if let Some(data) = stored_mesh_packet.data {
+            match data {
+                DataVariant::Encrypted(_) => {
+                    message_type = "<encrypted>".into();
+                    message_hint = "".into();
+                }
+                DataVariant::Decrypted(target, data) => {
+                    match target {
+                        DecryptTarget::Direct(channel_hash) => {
+                            to = format!("{}:0x{:02x}", to, channel_hash);
+                        }
+                        DecryptTarget::PKI => {}
+                        DecryptTarget::Channel(channel) => {
+                            to = channel.clone();
+                        }
+                    }
+                    message_type = data.portnum().as_str_name().into();
+                    message_hint = match data.portnum() {
+                        meshtastic::PortNum::TextMessageApp => {
+                            String::from_utf8_lossy(data.payload.as_slice()).into()
+                        }
+                        // meshtastic::PortNum::PositionApp => todo!(),
+                        // meshtastic::PortNum::NodeinfoApp => todo!(),
+                        // meshtastic::PortNum::WaypointApp => todo!(),
+                        meshtastic::PortNum::TelemetryApp => {
+                            match meshtastic::Telemetry::decode(data.payload.as_slice()) {
+                                Ok(telemetry) => telemetry
+                                    .variant
+                                    .map_or("<empty>".to_string(), |v| match v {
+                                        meshtastic::telemetry::Variant::DeviceMetrics(
+                                            _device_metrics,
+                                        ) => "DeviceMetrics".to_string(),
+                                        meshtastic::telemetry::Variant::EnvironmentMetrics(
+                                            _environment_metrics,
+                                        ) => "EnvironmentMetrics".to_string(),
+                                        meshtastic::telemetry::Variant::AirQualityMetrics(
+                                            _air_quality_metrics,
+                                        ) => "AirQualityMetrics".to_string(),
+                                        meshtastic::telemetry::Variant::PowerMetrics(
+                                            _power_metrics,
+                                        ) => "PowerMetrics".to_string(),
+                                        meshtastic::telemetry::Variant::LocalStats(
+                                            _local_stats,
+                                        ) => "LocalStats".to_string(),
+                                        meshtastic::telemetry::Variant::HealthMetrics(
+                                            _health_metrics,
+                                        ) => todo!(),
+                                        meshtastic::telemetry::Variant::HostMetrics(
+                                            _host_metrics,
+                                        ) => "HostMetrics".to_string(),
+                                    })
+                                    .into(),
+                                Err(e) => format!("<decoding error: {}>", e),
+                            }
+                        }
+                        _ => "".into(),
+                    };
+                }
+                DataVariant::DecryptError(decrypt_error, _) => match decrypt_error {
+                    DecryptError::DecryptorNotFound => {
+                        message_type = "<encrypted>".into();
+                        message_hint = "".into();
+                    }
+                    DecryptError::DecryptFailed => {
+                        message_type = "<decrypt error>".into();
+                        message_hint = "error while decrypting".into();
+                    }
+                    DecryptError::ConstructFailed => {
+                        message_type = "<decrypt error>".into();
+                        message_hint = "protobuf error".into();
+                    }
+                },
+            }
+        } else {
+            message_type = "<empty>".into();
+            message_hint = "".into();
         };
-        helper.serialize(serializer)
+
+        JournalData {
+            id: stored_mesh_packet.header.id,
+            timestamp: stored_mesh_packet.store_timestamp,
+            from: stored_mesh_packet.header.from,
+            to,
+            gateway: stored_mesh_packet.gateway,
+            relay: stored_mesh_packet.header.relay_node,
+            message_type,
+            message_hint,
+        }
     }
 }
 
-impl<'de> serde::Deserialize<'de> for JournalData {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let helper = JournalDataSerdeHelper::deserialize(deserializer)?;
-        Ok(JournalData {
-            port_num: meshtastic::PortNum::from_str_name(&helper.port_num).ok_or_else(|| {
-                serde::de::Error::custom(format!("Unknown port number: {}", helper.port_num))
-            })?,
-            hint: helper.hint.to_string(),
-        })
-    }
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub enum DecryptTarget {
+    Direct(u32),
+    PKI,
+    Channel(String),
 }
 
+#[derive(Clone)]
 pub enum DataVariant {
     Encrypted(Vec<u8>),
-    Decrypted(meshtastic::Data),
+    Decrypted(DecryptTarget, meshtastic::Data),
     DecryptError(DecryptError, Vec<u8>),
 }
 
@@ -63,7 +140,7 @@ pub enum DecryptError {
 #[derive(serde::Deserialize, serde::Serialize)]
 enum DataVariantSerdeHelper {
     Encrypted(Vec<u8>),
-    Decrypted(Vec<u8>),
+    Decrypted(DecryptTarget, Vec<u8>),
     DecryptError(DecryptError, Vec<u8>),
 }
 
@@ -74,7 +151,9 @@ impl serde::Serialize for DataVariant {
     {
         match self {
             DataVariant::Encrypted(data) => DataVariantSerdeHelper::Encrypted(data.clone()),
-            DataVariant::Decrypted(data) => DataVariantSerdeHelper::Decrypted(data.encode_to_vec()),
+            DataVariant::Decrypted(target, data) => {
+                DataVariantSerdeHelper::Decrypted(target.clone(), data.encode_to_vec())
+            }
             DataVariant::DecryptError(reason, data) => {
                 DataVariantSerdeHelper::DecryptError(reason.clone(), data.clone())
             }
@@ -92,11 +171,11 @@ impl<'de> serde::Deserialize<'de> for DataVariant {
 
         match helper {
             DataVariantSerdeHelper::Encrypted(items) => Ok(DataVariant::Encrypted(items)),
-            DataVariantSerdeHelper::Decrypted(items) => {
+            DataVariantSerdeHelper::Decrypted(target, items) => {
                 let data =
                     meshtastic::Data::decode(items.as_slice()).map_err(serde::de::Error::custom)?;
 
-                Ok(DataVariant::Decrypted(data))
+                Ok(DataVariant::Decrypted(target, data))
             }
             DataVariantSerdeHelper::DecryptError(reason, data) => {
                 Ok(DataVariant::DecryptError(reason, data))
@@ -112,7 +191,7 @@ pub struct StoreMeshRxInfo {
     pub rx_rssi: i32,
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
 pub struct StoredMeshHeader {
     pub from: NodeId,
     pub to: NodeId,
@@ -128,7 +207,7 @@ pub struct StoredMeshHeader {
     pub relay_node: ByteNodeId,
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
 pub struct StoredMeshPacket {
     pub sequence_number: u64,
     pub store_timestamp: DateTime<chrono::Utc>,
@@ -149,7 +228,15 @@ impl StoredMeshPacket {
                     {
                         if let Ok(decrypted) = cryptor.decrypt(self.header.id, items.clone()) {
                             if let Ok(data) = meshtastic::Data::decode(decrypted.as_slice()) {
-                                DataVariant::Decrypted(data)
+                                match cryptor {
+                                    meshtastic_connect::keyring::cryptor::Cryptor::Symmetric(
+                                        name,
+                                        _,
+                                    ) => DataVariant::Decrypted(DecryptTarget::Channel(name), data),
+                                    meshtastic_connect::keyring::cryptor::Cryptor::PKI(_) => {
+                                        DataVariant::Decrypted(DecryptTarget::PKI, data)
+                                    }
+                                }
                             } else {
                                 DataVariant::DecryptError(DecryptError::ConstructFailed, items)
                             }
@@ -160,7 +247,7 @@ impl StoredMeshPacket {
                         DataVariant::DecryptError(DecryptError::DecryptorNotFound, items)
                     }
                 }
-                DataVariant::Decrypted(items) => DataVariant::Decrypted(items),
+                DataVariant::Decrypted(target, items) => DataVariant::Decrypted(target, items),
             };
 
             self.data = Some(data);
@@ -524,7 +611,7 @@ impl NodeInfo {
         let packet_type = if let Some(data) = &stored_mesh_packet.data {
             match data {
                 DataVariant::Encrypted(_) => NodePacketType::CannotDecrypt,
-                DataVariant::Decrypted(data) => match self.update_using_data(timestamp, data) {
+                DataVariant::Decrypted(_, data) => match self.update_using_data(timestamp, data) {
                     Ok(portnum) => NodePacketType::Normal(format!("{}", portnum.as_str_name())),
                     Err(e) => {
                         log::error!("Failed to update using data: {}", e);

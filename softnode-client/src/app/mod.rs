@@ -1,12 +1,14 @@
 pub mod byte_node_id;
 pub mod data;
+mod journal;
 pub mod settings;
 mod telemetry;
 use std::{collections::HashMap, f32, sync::Arc};
 
 use chrono::{DateTime, Duration, Local, Utc};
-use data::{NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
+use data::{JournalData, NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
 use egui::{Color32, RichText, mutex::Mutex};
+use journal::Journal;
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;
@@ -19,9 +21,6 @@ enum Panel {
     Rssi(NodeId, Telemetry),
     Gateways(Option<NodeId>, Telemetry),
 }
-
-#[derive(Default, serde::Deserialize, serde::Serialize)]
-struct Journal {}
 
 pub enum UpdateState {
     IdleSince(DateTime<Local>),
@@ -47,6 +46,7 @@ pub struct PersistentData {
 
 #[derive(Default)]
 pub struct SoftNodeApp {
+    journal: Vec<JournalData>,
     nodes: HashMap<NodeId, NodeInfo>,
     last_sync_point: Option<u64>,
 
@@ -78,7 +78,7 @@ impl Default for PersistentData {
 
         Self {
             keyring,
-            active_panel: Panel::Journal(Journal::default()),
+            active_panel: Panel::Journal(Journal::new()),
             list_panel: Default::default(),
             update_interval_secs: Duration::seconds(5),
         }
@@ -155,6 +155,7 @@ impl SoftNodeApp {
                     });
 
                     entry.update(&stored_mesh_packet);
+                    self.journal.push(stored_mesh_packet.clone().into());
                     self.last_sync_point = Some(stored_mesh_packet.sequence_number);
                 }
                 if mesh_packets_count != 0 {
@@ -392,7 +393,7 @@ impl SoftNodeApp {
                 {
                     return Some(next_panel);
                 }
-                egui::CentralPanel::default().show(ctx, |ui| journal.ui(ui));
+                egui::CentralPanel::default().show(ctx, |ui| journal.ui(ui, &self.journal));
             }
             Panel::Telemetry(telemetry) => {
                 if let Some(next_panel) =
@@ -678,11 +679,5 @@ impl eframe::App for SoftNodeApp {
         if let Some(next_panel) = self.update_panel(ctx) {
             self.persistent.active_panel = next_panel;
         }
-    }
-}
-
-impl Journal {
-    fn ui(&mut self, _ui: &mut egui::Ui) {
-        // todo!()
     }
 }

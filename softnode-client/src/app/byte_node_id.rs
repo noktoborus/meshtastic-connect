@@ -3,7 +3,7 @@ use std::fmt;
 use meshtastic_connect::keyring::node_id::NodeId;
 
 // Last byte of NodeId
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ByteNodeId(u8);
 
 impl From<u32> for ByteNodeId {
