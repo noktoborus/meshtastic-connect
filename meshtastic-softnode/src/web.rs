@@ -4,6 +4,7 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::{Json, Router, routing};
 use serde::Deserialize;
+use tower_http::cors;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
@@ -55,6 +56,10 @@ async fn api_softnode(
 
 pub(crate) async fn start(config: WebConfig, sqlite: SQLite) -> Result<(), std::io::Error> {
     let state = Arc::new(Web { sqlite });
+    let cors = cors::CorsLayer::new()
+        .allow_origin(cors::Any)
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+        .allow_headers([axum::http::header::CONTENT_TYPE]);
 
     let app = Router::new()
         .fallback_service(ServeDir::new(config.serve_dir))
@@ -66,6 +71,7 @@ pub(crate) async fn start(config: WebConfig, sqlite: SQLite) -> Result<(), std::
             ),
         )
         .with_state(state)
+        .layer(cors)
         .layer(TraceLayer::new_for_http());
 
     axum_server::bind(config.http_listen.into())
