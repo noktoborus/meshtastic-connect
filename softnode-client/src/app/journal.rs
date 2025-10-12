@@ -24,7 +24,8 @@ impl Journal {
                         ui.heading("Кому");
                         ui.heading("Тип");
                         ui.end_row();
-                        for entry in journal {
+
+                        for entry in journal.iter().rev() {
                             if last_date != entry.timestamp.date_naive() {
                                 last_date = entry.timestamp.date_naive();
                                 ui.heading(last_date.format("%Y-%m-%d").to_string());

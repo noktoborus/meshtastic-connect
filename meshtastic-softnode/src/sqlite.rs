@@ -62,7 +62,7 @@ impl SQLite {
                     format!("SELECT * FROM mesh_packets WHERE sequence_number > {} ORDER BY sequence_number ASC LIMIT {}", from, limit)
                 } else {
                     format!(
-                        "SELECT * FROM mesh_packets ORDER BY sequence_number ASC LIMIT {}",
+                        "SELECT * FROM mesh_packets WHERE log_time > datetime('now', '-1 day') ORDER BY sequence_number ASC LIMIT {}",
                         limit
                     )
                 };
