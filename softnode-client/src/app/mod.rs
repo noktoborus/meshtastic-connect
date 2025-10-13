@@ -445,7 +445,7 @@ impl SoftNodeApp {
                     self.last_sync_point = None;
                     self.nodes.clear();
                     self.journal.clear();
-                    self.persistent.active_panel = Panel::Journal(Journal {});
+                    self.persistent.active_panel = Panel::Journal(Journal::new());
                     ctx.request_repaint();
                 }
             }
@@ -653,7 +653,7 @@ impl eframe::App for SoftNodeApp {
                     )
                     .clicked()
                 {
-                    self.persistent.active_panel = Panel::Journal(Journal {});
+                    self.persistent.active_panel = Panel::Journal(Journal::new());
                 }
                 if ui
                     .selectable_label(

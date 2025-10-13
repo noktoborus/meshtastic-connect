@@ -2,12 +2,18 @@ use chrono::NaiveDate;
 
 use super::data::JournalData;
 
+const SHOW_LIMIT_BASE: usize = 150;
+
 #[derive(Default, serde::Deserialize, serde::Serialize)]
-pub struct Journal {}
+pub struct Journal {
+    show_limit: usize,
+}
 
 impl Journal {
     pub fn new() -> Self {
-        Journal {}
+        Journal {
+            show_limit: SHOW_LIMIT_BASE,
+        }
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, journal: &Vec<JournalData>) {
@@ -25,7 +31,7 @@ impl Journal {
                         ui.heading("Тип");
                         ui.end_row();
 
-                        for entry in journal.iter().rev() {
+                        for entry in journal.iter().rev().take(self.show_limit) {
                             if last_date != entry.timestamp.date_naive() {
                                 last_date = entry.timestamp.date_naive();
                                 ui.heading(last_date.format("%Y-%m-%d").to_string());
@@ -44,6 +50,11 @@ impl Journal {
                             ui.label(entry.message_type.as_str());
                             ui.label(entry.message_hint.as_str());
                             ui.end_row();
+                        }
+                        if journal.len() > self.show_limit {
+                            if ui.button("показывать больше").clicked() {
+                                self.show_limit += SHOW_LIMIT_BASE;
+                            }
                         }
                     });
                 });
