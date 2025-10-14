@@ -36,48 +36,42 @@ impl Default for UpdateState {
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct PersistentData {
-    keyring: Keyring,
-
     active_panel: Panel,
     list_panel: ListPanel,
 
     update_interval_secs: Duration,
 }
 
-#[derive(Default)]
 pub struct SoftNodeApp {
     journal: Vec<JournalData>,
     nodes: HashMap<NodeId, NodeInfo>,
     last_sync_point: Option<u64>,
 
+    // Keyring data. Similar to persistent,
+    // but saved separately, to avoid keyring drop
+    // when persistent structure is updated
+    keyring: Keyring,
+    // Persistent data
     persistent: PersistentData,
     downloads: Arc<Mutex<UpdateState>>,
 }
 
+impl Default for SoftNodeApp {
+    fn default() -> Self {
+        Self {
+            journal: Default::default(),
+            nodes: Default::default(),
+            last_sync_point: Default::default(),
+            persistent: Default::default(),
+            keyring: default_keyring(),
+            downloads: Default::default(),
+        }
+    }
+}
+
 impl Default for PersistentData {
     fn default() -> Self {
-        let mut keyring = Keyring::default();
-
-        for channel_name in [
-            "ShortTurbo",
-            "ShortFast",
-            "ShortSlow",
-            "MediumFast",
-            "MediumSlow",
-            "LongFast",
-            "LongModerate",
-            "LongSlow",
-        ] {
-            keyring
-                .add_channel(
-                    channel_name.into(),
-                    "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
-                )
-                .unwrap();
-        }
-
         Self {
-            keyring,
             active_panel: Panel::Journal(Journal::new()),
             list_panel: Default::default(),
             update_interval_secs: Duration::seconds(5),
@@ -95,14 +89,8 @@ impl PersistentData {
         // Note that you must enable the `persistence` feature for this to work.
         if let Some(storage) = cc.storage {
             match eframe::get_value(storage, eframe::APP_KEY) {
-                Some(value) => {
-                    log::info!("Loading previous app state");
-                    value
-                }
-                None => {
-                    log::info!("Generate default app state");
-                    Default::default()
-                }
+                Some(value) => value,
+                None => Default::default(),
             }
         } else {
             Default::default()
@@ -114,11 +102,45 @@ impl PersistentData {
     }
 }
 
+fn default_keyring() -> Keyring {
+    let mut keyring = Keyring::default();
+
+    for channel_name in [
+        "ShortTurbo",
+        "ShortFast",
+        "ShortSlow",
+        "MediumFast",
+        "MediumSlow",
+        "LongFast",
+        "LongModerate",
+        "LongSlow",
+    ] {
+        keyring
+            .add_channel(
+                channel_name.into(),
+                "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
+            )
+            .unwrap();
+    }
+
+    keyring
+}
+
 impl SoftNodeApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let keyring = cc
+            .storage
+            .map(|storage| eframe::get_value(storage, PERSISTENT_KEYRING_KEY))
+            .flatten()
+            .unwrap_or_else(|| default_keyring());
+
         Self {
+            journal: Default::default(),
+            nodes: Default::default(),
+            last_sync_point: Default::default(),
+            downloads: Default::default(),
+            keyring,
             persistent: PersistentData::new(cc),
-            ..Default::default()
         }
     }
 }
@@ -135,7 +157,7 @@ impl SoftNodeApp {
                 for stored_mesh_packet in stored_mesh_packets.drain(..) {
                     let node_id = stored_mesh_packet.header.from;
 
-                    let stored_mesh_packet = stored_mesh_packet.decrypt(&self.persistent.keyring);
+                    let stored_mesh_packet = stored_mesh_packet.decrypt(&self.keyring);
 
                     if let Some(gateway_id) = stored_mesh_packet.gateway {
                         let gateway_entry =
@@ -441,7 +463,7 @@ impl SoftNodeApp {
                 });
             }
             Panel::Settings(settings) => {
-                if settings.ui(ctx, &mut self.persistent.keyring) {
+                if settings.ui(ctx, &mut self.keyring) {
                     self.last_sync_point = None;
                     self.nodes.clear();
                     self.journal.clear();
@@ -623,9 +645,12 @@ impl SoftNodeApp {
     }
 }
 
+const PERSISTENT_KEYRING_KEY: &str = "keyring";
+
 impl eframe::App for SoftNodeApp {
     /// Called by the framework to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, PERSISTENT_KEYRING_KEY, &self.keyring);
         self.persistent.save(storage);
     }
 
@@ -643,8 +668,7 @@ impl eframe::App for SoftNodeApp {
                     )
                     .clicked()
                 {
-                    self.persistent.active_panel =
-                        Panel::Settings(Settings::new(&self.persistent.keyring));
+                    self.persistent.active_panel = Panel::Settings(Settings::new(&self.keyring));
                 }
                 if ui
                     .selectable_label(
