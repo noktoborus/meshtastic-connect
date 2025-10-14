@@ -1,6 +1,7 @@
 pub mod byte_node_id;
 pub mod data;
 mod journal;
+mod map;
 pub mod settings;
 mod telemetry;
 use std::{collections::HashMap, f32, sync::Arc};
@@ -9,9 +10,12 @@ use chrono::{DateTime, Duration, Local, Utc};
 use data::{JournalData, NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
 use egui::{Color32, RichText, mutex::Mutex};
 use journal::Journal;
+use map::Map;
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;
+
+use crate::app::map::MapContext;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 enum Panel {
@@ -20,6 +24,7 @@ enum Panel {
     Settings(Settings),
     Rssi(NodeId, Telemetry),
     Gateways(Option<NodeId>, Telemetry),
+    Map(Map),
 }
 
 pub enum UpdateState {
@@ -47,6 +52,8 @@ pub struct SoftNodeApp {
     nodes: HashMap<NodeId, NodeInfo>,
     last_sync_point: Option<u64>,
 
+    map_context: MapContext,
+
     // Keyring data. Similar to persistent,
     // but saved separately, to avoid keyring drop
     // when persistent structure is updated
@@ -54,19 +61,6 @@ pub struct SoftNodeApp {
     // Persistent data
     persistent: PersistentData,
     downloads: Arc<Mutex<UpdateState>>,
-}
-
-impl Default for SoftNodeApp {
-    fn default() -> Self {
-        Self {
-            journal: Default::default(),
-            nodes: Default::default(),
-            last_sync_point: Default::default(),
-            persistent: Default::default(),
-            keyring: default_keyring(),
-            downloads: Default::default(),
-        }
-    }
 }
 
 impl Default for PersistentData {
@@ -138,6 +132,7 @@ impl SoftNodeApp {
             journal: Default::default(),
             nodes: Default::default(),
             last_sync_point: Default::default(),
+            map_context: MapContext::new(cc.egui_ctx.clone()),
             downloads: Default::default(),
             keyring,
             persistent: PersistentData::new(cc),
@@ -640,6 +635,10 @@ impl SoftNodeApp {
                     });
                 }
             }
+            Panel::Map(map) => {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| map.ui(ui, &mut self.map_context, &self.nodes));
+            }
         };
         None
     }
@@ -697,6 +696,13 @@ impl eframe::App for SoftNodeApp {
                     .clicked()
                 {
                     self.persistent.active_panel = Panel::Gateways(None, Telemetry {});
+                }
+
+                if ui
+                    .selectable_label(matches!(self.persistent.active_panel, Panel::Map(_)), "Map")
+                    .clicked()
+                {
+                    self.persistent.active_panel = Panel::Map(Map::new());
                 }
             })
         });

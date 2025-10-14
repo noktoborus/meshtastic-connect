@@ -303,7 +303,7 @@ pub struct NodeTelemetry {
     pub value: f64,
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize, PartialEq, PartialOrd)]
 pub struct Position {
     pub seq_number: u32,
     pub timestamp: DateTime<Utc>,
@@ -424,7 +424,11 @@ impl NodeInfo {
                     speed: mesh_position.ground_speed(),
                 };
 
-                self.position.push(position);
+                if position.timestamp == DateTime::<Utc>::default() {
+                    self.position.push(position);
+                } else {
+                    push_statistic!(self.position, position);
+                }
             }
             meshtastic::PortNum::NodeinfoApp => {
                 let user =

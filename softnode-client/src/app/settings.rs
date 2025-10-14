@@ -50,7 +50,7 @@ impl Settings {
                         "yaml",
                     );
                     layout_job.wrap.max_width = wrap_width;
-                    ui.fonts(|f| f.layout_job(layout_job))
+                    ui.fonts_mut(|f| f.layout_job(layout_job))
                 };
                 ui.collapsing("Информация о ключах", |ui| {
                     #[cfg(target_arch = "wasm32")]

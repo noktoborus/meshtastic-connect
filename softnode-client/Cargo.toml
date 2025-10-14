@@ -5,8 +5,8 @@ edition = "2024"
 
 [dependencies]
 meshtastic-connect = { path = ".." }
-egui = "0.32"
-eframe = { version = "0.32", default-features = false, features = [
+egui = "0.33"
+eframe = { version = "0.33", default-features = false, features = [
     "accesskit",     # Make egui compatible with screen readers. NOTE: adds a lot of dependencies.
     "default_fonts", # Embed the default egui fonts.
     "glow",          # Use the glow rendering backend. Alternative: "wgpu".
@@ -18,12 +18,13 @@ log = "0.4.28"
 
 # You only need serde if you want app persistence:
 serde = { version = "1.0.228", features = ["derive"] }
-egui_plot = "0.33.0"
+egui_plot = "0.34"
 chrono = { version = "0.4.42", features = ["serde", "wasmbind"] }
 ehttp = { version = "0.5.0", features = ["json"] }
 prost = "0.14.1"
-egui_extras = { version = "0.32.3", features = ["syntect"] }
+egui_extras = { version = "0.33", features = ["syntect"] }
 serde_yaml_ng = "0.10.0"
+walkers = { version = "0.47.0", features = ["serde"] }
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
