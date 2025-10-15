@@ -353,7 +353,10 @@ impl ListPanel {
                                     }
                                 }
                                 if !node_info.gateway_for.is_empty() {
-                                    if ui.button("Gateway").clicked() {
+                                    if ui
+                                        .button(format!("Gateway {}", node_info.gateway_for.len()))
+                                        .clicked()
+                                    {
                                         next_page = Some(Panel::Gateways(
                                             Some(node_info.node_id),
                                             Default::default(),
