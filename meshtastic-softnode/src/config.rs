@@ -288,6 +288,7 @@ pub(crate) struct WebConfig {
     pub(crate) serve_dir: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) tls_acme: Option<TlsAcme>,
+    pub(crate) select_limit: usize,
 }
 
 impl Default for WebConfig {
@@ -297,6 +298,7 @@ impl Default for WebConfig {
             http_listen: "127.0.0.1:8080".parse().unwrap(),
             serve_dir: "./web/".to_string(),
             tls_acme: None,
+            select_limit: 1000,
         }
     }
 }

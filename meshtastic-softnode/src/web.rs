@@ -5,7 +5,6 @@ use axum::http::StatusCode;
 use axum::{Json, Router, routing};
 use futures::StreamExt;
 use rustls_acme::AcmeConfig;
-use rustls_acme::axum::AxumAcceptor;
 use rustls_acme::caches::DirCache;
 use serde::Deserialize;
 use tower_http::cors;
@@ -31,6 +30,7 @@ pub(crate) fn init() {
 
 #[derive(Clone)]
 struct Web {
+    pub select_limit: usize,
     pub sqlite: SQLite,
 }
 
@@ -46,10 +46,9 @@ async fn api_softnode(
     StatusCode,
     Json<Vec<softnode_client::app::data::StoredMeshPacket>>,
 ) {
-    const SELECT_LIMIT: usize = 100;
     if let Ok(packets) = state
         .sqlite
-        .select_packets(params.start, SELECT_LIMIT)
+        .select_packets(params.start, state.select_limit)
         .await
     {
         (StatusCode::OK, Json(packets))
@@ -59,7 +58,10 @@ async fn api_softnode(
 }
 
 pub(crate) async fn start(config: WebConfig, sqlite: SQLite) -> Result<(), std::io::Error> {
-    let state = Arc::new(Web { sqlite });
+    let state = Arc::new(Web {
+        select_limit: config.select_limit,
+        sqlite,
+    });
     let cors = cors::CorsLayer::new()
         .allow_origin(cors::Any)
         .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
