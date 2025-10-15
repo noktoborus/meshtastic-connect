@@ -4,9 +4,9 @@ mod journal;
 mod map;
 pub mod settings;
 mod telemetry;
-use std::{collections::HashMap, f32, sync::Arc};
+use std::{collections::HashMap, f32, ops::ControlFlow, sync::Arc};
 
-use chrono::{DateTime, Duration, Local, Utc};
+use chrono::{DateTime, Duration, Utc};
 use data::{JournalData, NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
 use egui::{Color32, RichText, mutex::Mutex};
 use journal::Journal;
@@ -27,15 +27,31 @@ enum Panel {
     Map(Map),
 }
 
-pub enum UpdateState {
-    IdleSince(DateTime<Local>),
-    InProgress,
-    Downloaded(Vec<StoredMeshPacket>),
+pub enum DownloadState {
+    Idle,
+    WaitHeader,
+    // Unknown full size
+    Download,
+    // Known full size
+    DownloadWithSize(f32, usize),
 }
 
-impl Default for UpdateState {
+impl std::fmt::Display for DownloadState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DownloadState::Idle => write!(f, "Idle"),
+            DownloadState::WaitHeader => write!(f, "Waiting"),
+            DownloadState::Download => write!(f, "Downloading"),
+            DownloadState::DownloadWithSize(done_percent, _) => {
+                write!(f, "Downloading {:.2}%", done_percent)
+            }
+        }
+    }
+}
+
+impl Default for DownloadState {
     fn default() -> Self {
-        UpdateState::IdleSince(DateTime::<Local>::default())
+        DownloadState::Idle
     }
 }
 
@@ -60,7 +76,8 @@ pub struct SoftNodeApp {
     keyring: Keyring,
     // Persistent data
     persistent: PersistentData,
-    downloads: Arc<Mutex<UpdateState>>,
+    download_state: Arc<Mutex<DownloadState>>,
+    download_promise: poll_promise::Promise<DownloadPromiseResult>,
 }
 
 impl Default for PersistentData {
@@ -128,94 +145,188 @@ impl SoftNodeApp {
             .flatten()
             .unwrap_or_else(|| default_keyring());
 
+        let download_state: Arc<Mutex<DownloadState>> = Default::default();
         Self {
             journal: Default::default(),
             nodes: Default::default(),
             last_sync_point: Default::default(),
             map_context: MapContext::new(cc.egui_ctx.clone()),
-            downloads: Default::default(),
+            download_state: download_state.clone(),
             keyring,
             persistent: PersistentData::new(cc),
+            download_promise: go_download_promise(
+                std::time::Duration::default(),
+                Default::default(),
+                download_state,
+                cc.egui_ctx.clone(),
+            ),
         }
     }
 }
 
+type DownloadPromiseResult = Vec<StoredMeshPacket>;
+
+fn go_download_promise(
+    delay: std::time::Duration,
+    last_sync_point: Option<u64>,
+    state: Arc<Mutex<DownloadState>>,
+    egui_ctx: egui::Context,
+) -> poll_promise::Promise<DownloadPromiseResult> {
+    poll_promise::Promise::spawn_thread("background http sync", move || {
+        if !delay.is_zero() {
+            log::info!("sync delay for {:?}", delay);
+            std::thread::sleep(delay);
+        }
+
+        let api_url = format!("{}{}", env!("SOFTNODE_API_URL_BASE"), "/sync");
+        let request = if let Some(sync_point) = last_sync_point {
+            ehttp::Request::get(format!("{}?start={}", api_url, sync_point))
+        } else {
+            ehttp::Request::get(api_url)
+        };
+
+        *state.lock() = DownloadState::WaitHeader;
+        let inner_state = state.clone();
+        let body = Arc::new(Mutex::new(Vec::new()));
+        let inner_body = body.clone();
+        log::info!("Fetching data...");
+        ehttp::streaming::fetch_streaming_blocking(
+            request,
+            Box::new(move |part| {
+                let part = match part {
+                    Err(err) => {
+                        log::error!("Fetching error: {}", err);
+                        return ControlFlow::Break(());
+                    }
+                    Ok(part) => part,
+                };
+
+                match part {
+                    ehttp::streaming::Part::Response(response) => match response.status {
+                        200 => {
+                            match response
+                                .headers
+                                .get("Content-Length")
+                                .ok_or_else(|| "No Content-Length".to_string())
+                                .map(|v| {
+                                    v.parse::<usize>()
+                                        .map_err(|e| format!("Content-Length parse problem: {e}"))
+                                })
+                                .flatten()
+                            {
+                                Ok(length) => {
+                                    *inner_state.lock() =
+                                        DownloadState::DownloadWithSize(0.0, length);
+                                    log::info!("Fetching length: len={}", length);
+                                }
+                                Err(e) => {
+                                    *inner_state.lock() = DownloadState::Download;
+                                    log::error!(
+                                        "Fetching length error: {}, continue download without length",
+                                        e
+                                    )
+                                }
+                            }
+                            ControlFlow::Continue(())
+                        }
+                        _ => {
+                            log::error!(
+                                "Fetching error: status code={}: {}",
+                                response.status,
+                                response.status_text
+                            );
+                            *inner_state.lock() = DownloadState::Idle;
+                            ControlFlow::Break(())
+                        }
+                    },
+                    ehttp::streaming::Part::Chunk(chunk) => {
+                        let mut body = inner_body.lock();
+                        let mut state = inner_state.lock();
+                        body.extend_from_slice(&chunk);
+
+                        let next_state = match *state {
+                            DownloadState::Idle
+                            | DownloadState::WaitHeader
+                            | DownloadState::Download => DownloadState::Download,
+                            DownloadState::DownloadWithSize(_, full_size) => {
+                                DownloadState::DownloadWithSize(
+                                    body.len() as f32 / full_size as f32 * 100.0,
+                                    full_size,
+                                )
+                            }
+                        };
+                        *state = next_state;
+                        ControlFlow::Continue(())
+                    }
+                }
+            }),
+        );
+
+        *state.lock() = DownloadState::Idle;
+        let body = body.lock();
+        if body.len() != 0 {
+            match serde_json::from_slice::<Vec<StoredMeshPacket>>(body.as_slice()) {
+                Ok(body) => {
+                    log::info!("Fetched {} packets", body.len());
+                    egui_ctx.request_repaint();
+                    body
+                }
+                Err(e) => {
+                    log::error!("Fetching json error: {}", e);
+                    egui_ctx.request_repaint();
+                    Vec::new()
+                }
+            }
+        } else {
+            egui_ctx.request_repaint();
+            Vec::new()
+        }
+    })
+}
+
 impl SoftNodeApp {
     fn update_data(&mut self, ctx: &egui::Context) {
-        let downloads: &mut UpdateState = &mut self.downloads.lock();
-        match downloads {
-            UpdateState::InProgress => {}
-            UpdateState::Downloaded(stored_mesh_packets) => {
-                let mesh_packets_count = stored_mesh_packets.len();
-
-                log::info!("Fetched {} packets", mesh_packets_count);
-                for stored_mesh_packet in stored_mesh_packets.drain(..) {
-                    let node_id = stored_mesh_packet.header.from;
-
-                    let stored_mesh_packet = stored_mesh_packet.decrypt(&self.keyring);
-
-                    if let Some(gateway_id) = stored_mesh_packet.gateway {
-                        let gateway_entry =
-                            self.nodes
-                                .entry(gateway_id)
-                                .or_insert_with(|| data::NodeInfo {
-                                    node_id: gateway_id,
-                                    ..Default::default()
-                                });
-
-                        gateway_entry.update_as_gateway(&stored_mesh_packet);
-                    }
-
-                    let entry = self.nodes.entry(node_id).or_insert_with(|| data::NodeInfo {
-                        node_id,
-                        ..Default::default()
-                    });
-
-                    entry.update(&stored_mesh_packet);
-                    self.journal.push(stored_mesh_packet.clone().into());
-                    self.last_sync_point = Some(stored_mesh_packet.sequence_number);
-                }
-                if mesh_packets_count != 0 {
-                    *downloads = UpdateState::IdleSince(Default::default());
-                } else {
-                    *downloads = UpdateState::IdleSince(Local::now());
-                }
-                ctx.request_repaint_after(std::time::Duration::from_secs_f32(
-                    self.persistent.update_interval_secs.as_seconds_f32() * 1.5,
-                ));
+        if let Some(promise_result) = self.download_promise.ready_mut() {
+            let next_delay = if promise_result.len() == 0 {
+                std::time::Duration::from_secs(5)
+            } else {
+                Default::default()
+            };
+            if let Some(last_record) = promise_result.last() {
+                self.last_sync_point = Some(last_record.sequence_number);
             }
-            UpdateState::IdleSince(start_time) => {
-                // TODO: use settings' option for standalone and relative for web
-                let api_url = format!("{}{}", env!("SOFTNODE_API_URL_BASE"), "/sync");
-                let elapsed = Local::now().signed_duration_since(start_time);
 
-                if elapsed >= self.persistent.update_interval_secs {
-                    let ctx = ctx.clone();
-                    let request = if let Some(sync_point) = self.last_sync_point {
-                        ehttp::Request::get(format!("{}?start={}", api_url, sync_point))
-                    } else {
-                        ehttp::Request::get(api_url)
-                    };
+            for stored_mesh_packet in promise_result.drain(..) {
+                let node_id = stored_mesh_packet.header.from;
+                let stored_mesh_packet = stored_mesh_packet.decrypt(&self.keyring);
 
-                    *downloads = UpdateState::InProgress;
-                    let downloads = self.downloads.clone();
-                    ehttp::fetch(request, move |result| {
-                        log::info!("Fetching data...");
-                        match result {
-                            Ok(data) => {
-                                let mesh_packets = data.json::<Vec<StoredMeshPacket>>().unwrap();
-                                *downloads.lock() = UpdateState::Downloaded(mesh_packets);
-                            }
-                            Err(err) => {
-                                log::error!("Error fetching data: {:?}", err);
-                                *downloads.lock() = UpdateState::IdleSince(Local::now());
-                                // TODO: Handle the error
-                            }
-                        }
-                        ctx.request_repaint();
-                    });
+                if let Some(gateway_id) = stored_mesh_packet.gateway {
+                    let gateway_entry =
+                        self.nodes
+                            .entry(gateway_id)
+                            .or_insert_with(|| data::NodeInfo {
+                                node_id: gateway_id,
+                                ..Default::default()
+                            });
+
+                    gateway_entry.update_as_gateway(&stored_mesh_packet);
                 }
+
+                let entry = self.nodes.entry(node_id).or_insert_with(|| data::NodeInfo {
+                    node_id,
+                    ..Default::default()
+                });
+
+                entry.update(&stored_mesh_packet);
+                self.journal.push(stored_mesh_packet.clone().into());
             }
+
+            self.download_promise = go_download_promise(
+                next_delay,
+                self.last_sync_point,
+                self.download_state.clone(),
+                ctx.clone(),
+            );
         }
     }
 }
@@ -706,6 +817,10 @@ impl eframe::App for SoftNodeApp {
                     .clicked()
                 {
                     self.persistent.active_panel = Panel::Map(Map::new());
+                }
+                let state = self.download_state.lock();
+                if !matches!(*state, DownloadState::Idle) {
+                    ui.label(format!("{}", *state));
                 }
             })
         });
