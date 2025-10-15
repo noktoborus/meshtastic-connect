@@ -19,7 +19,7 @@ impl MapContext {
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
-pub struct Map {
+pub struct MapPanel {
     map_memory: MapMemory,
 }
 
@@ -54,13 +54,7 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
     }
 }
 
-impl Map {
-    pub fn new() -> Self {
-        let mut map_memory = MapMemory::default();
-        let _ = map_memory.set_zoom(4.0);
-        Self { map_memory }
-    }
-
+impl MapPanel {
     pub fn ui<'a>(
         &mut self,
         ui: &mut egui::Ui,

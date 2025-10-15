@@ -18,8 +18,7 @@ impl Journal {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, journal: &Vec<JournalData>) {
         let mut last_date = NaiveDate::MIN;
-        egui::ScrollArea::vertical()
-            .stick_to_right(true)
+        egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 egui::Frame::default().show(ui, |ui| {

@@ -10,7 +10,7 @@ use chrono::{DateTime, Duration, Utc};
 use data::{JournalData, NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
 use egui::{Color32, RichText, mutex::Mutex};
 use journal::Journal;
-use map::Map;
+use map::MapPanel;
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;
@@ -24,7 +24,7 @@ enum Panel {
     Settings(Settings),
     Rssi(NodeId, Telemetry),
     Gateways(Option<NodeId>, Telemetry),
-    Map(Map),
+    Map,
 }
 
 pub enum DownloadState {
@@ -58,8 +58,9 @@ impl Default for DownloadState {
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct PersistentData {
     active_panel: Panel,
-    list_panel: ListPanel,
 
+    list_panel: ListPanel,
+    map: MapPanel,
     update_interval_secs: Duration,
 }
 
@@ -76,6 +77,7 @@ pub struct SoftNodeApp {
     keyring: Keyring,
     // Persistent data
     persistent: PersistentData,
+    bootstrap_done: bool,
     download_state: Arc<Mutex<DownloadState>>,
     download_promise: poll_promise::Promise<DownloadPromiseResult>,
 }
@@ -85,6 +87,7 @@ impl Default for PersistentData {
         Self {
             active_panel: Panel::Journal(Journal::new()),
             list_panel: Default::default(),
+            map: Default::default(),
             update_interval_secs: Duration::seconds(5),
         }
     }
@@ -154,6 +157,7 @@ impl SoftNodeApp {
             download_state: download_state.clone(),
             keyring,
             persistent: PersistentData::new(cc),
+            bootstrap_done: false,
             download_promise: go_download_promise(
                 std::time::Duration::default(),
                 Default::default(),
@@ -182,14 +186,14 @@ fn go_download_promise(
         let request = if let Some(sync_point) = last_sync_point {
             ehttp::Request::get(format!("{}?start={}", api_url, sync_point))
         } else {
-            ehttp::Request::get(api_url)
+            ehttp::Request::get(&api_url)
         };
 
         *state.lock() = DownloadState::WaitHeader;
         let inner_state = state.clone();
         let body = Arc::new(Mutex::new(Vec::new()));
         let inner_body = body.clone();
-        log::info!("Fetching data...");
+        log::info!("Fetching data: {} ...", api_url);
         ehttp::streaming::fetch_streaming_blocking(
             request,
             Box::new(move |part| {
@@ -285,7 +289,7 @@ fn go_download_promise(
 }
 
 impl SoftNodeApp {
-    fn update_data(&mut self, ctx: &egui::Context) {
+    fn update_data(&mut self, ctx: &egui::Context) -> bool {
         if let Some(promise_result) = self.download_promise.ready_mut() {
             let next_delay = if promise_result.len() == 0 {
                 std::time::Duration::from_secs(5)
@@ -327,7 +331,12 @@ impl SoftNodeApp {
                 self.download_state.clone(),
                 ctx.clone(),
             );
+            if !next_delay.is_zero() {
+                self.bootstrap_done = true;
+            }
         }
+
+        !self.bootstrap_done
     }
 }
 
@@ -339,6 +348,7 @@ enum ListPanelFilter {
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 struct ListPanel {
+    show: bool,
     telemetry_enabled_for: HashMap<TelemetryVariant, Vec<NodeId>>,
     filter: String,
 }
@@ -346,192 +356,178 @@ struct ListPanel {
 impl ListPanel {
     fn ui(
         &mut self,
-        ctx: &egui::Context,
+        ui: &mut egui::Ui,
         mut nodes: Vec<&NodeInfo>,
         node_selected: Option<NodeId>,
         filter_by: ListPanelFilter,
     ) -> Option<Panel> {
         let mut next_page = None;
-        egui::SidePanel::left("list_panel")
-            .resizable(true)
-            .default_width(300.0)
-            .min_width(200.0)
-            .show(ctx, |ui| {
+
+        egui::Frame::new().inner_margin(3.0).show(ui, |ui| {
+            ui.horizontal(|ui| {
                 egui::TextEdit::singleline(&mut self.filter)
+                    .desired_width(f32::INFINITY)
                     .hint_text("Search note by id or name")
-                    .show(ui);
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.vertical(|ui| {
-                        nodes.sort_by_key(|node_info| node_info.node_id);
-                        for node_info in nodes {
-                            if !self.filter.is_empty() {
-                                let filter = self.filter.to_uppercase();
-                                let mut skip = true;
-                                if node_info
-                                    .node_id
-                                    .to_string()
-                                    .to_uppercase()
-                                    .contains(filter.as_str())
-                                {
-                                    skip = false;
-                                }
-                                if let Some(extended_info) = node_info.extended_info_history.last()
-                                {
-                                    if extended_info
-                                        .short_name
-                                        .to_uppercase()
-                                        .contains(filter.as_str())
-                                    {
-                                        skip = false;
-                                    }
-                                    if extended_info
-                                        .long_name
-                                        .to_uppercase()
-                                        .contains(filter.as_str())
-                                    {
-                                        skip = false;
-                                    }
-                                }
-                                if skip {
-                                    continue;
-                                }
+                    .show(ui)
+                    .response
+                    .request_focus();
+                ui.input(|i| {
+                    if i.key_pressed(egui::Key::Escape) {
+                        self.filter.clear();
+                    }
+                })
+            });
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                nodes.sort_by_key(|node_info| node_info.node_id);
+                for node_info in nodes {
+                    if !self.filter.is_empty() {
+                        let filter = self.filter.to_uppercase();
+                        let mut skip = true;
+                        if node_info
+                            .node_id
+                            .to_string()
+                            .to_uppercase()
+                            .contains(filter.as_str())
+                        {
+                            skip = false;
+                        }
+                        if let Some(extended_info) = node_info.extended_info_history.last() {
+                            if extended_info
+                                .short_name
+                                .to_uppercase()
+                                .contains(filter.as_str())
+                            {
+                                skip = false;
                             }
-
-                            let mut show_and_filter_by_telemetry = false;
-                            match filter_by {
-                                ListPanelFilter::None => {}
-                                ListPanelFilter::Telemetry => {
-                                    show_and_filter_by_telemetry = true;
-                                }
-                                ListPanelFilter::Gateway => {
-                                    if node_info.gateway_for.is_empty() {
-                                        continue;
-                                    }
-                                }
+                            if extended_info
+                                .long_name
+                                .to_uppercase()
+                                .contains(filter.as_str())
+                            {
+                                skip = false;
                             }
+                        }
+                        if skip {
+                            continue;
+                        }
+                    }
 
-                            let telemetry_variants = show_and_filter_by_telemetry.then(|| {
-                                node_info
-                                    .telemetry
-                                    .iter()
-                                    .map(|(k, v)| (k, v.len()))
-                                    .filter(|(_, v)| *v > 1)
-                                    .map(|(k, _)| k)
-                                    .collect::<Vec<_>>()
-                            });
-                            if let Some(ref telemetry_variants) = telemetry_variants {
-                                if telemetry_variants.is_empty() {
-                                    continue;
-                                }
+                    let mut show_and_filter_by_telemetry = false;
+                    match filter_by {
+                        ListPanelFilter::None => {}
+                        ListPanelFilter::Telemetry => {
+                            show_and_filter_by_telemetry = true;
+                        }
+                        ListPanelFilter::Gateway => {
+                            if node_info.gateway_for.is_empty() {
+                                continue;
                             }
-                            ui.separator();
+                        }
+                    }
 
-                            if let Some(extended) = node_info.extended_info_history.last() {
-                                let node_id_str = node_info.node_id.to_string();
-                                ui.horizontal(|ui| {
-                                    if node_selected
-                                        .map(|v| v == node_info.node_id)
-                                        .unwrap_or(false)
-                                    {
-                                        ui.heading(
-                                            RichText::new("➧")
-                                                .color(Color32::from_rgb(0, 153, 255)),
-                                        );
-                                    }
-                                    if node_id_str.ends_with(extended.short_name.as_str()) {
-                                        ui.heading(node_id_str);
-                                    } else {
-                                        ui.heading(format!(
-                                            "{} {}",
-                                            node_id_str, extended.short_name
-                                        ));
-                                    }
-                                });
-                                if extended.long_name.len() > 0 {
-                                    ui.label(extended.long_name.clone());
-                                }
+                    let telemetry_variants = show_and_filter_by_telemetry.then(|| {
+                        node_info
+                            .telemetry
+                            .iter()
+                            .map(|(k, v)| (k, v.len()))
+                            .filter(|(_, v)| *v > 1)
+                            .map(|(k, _)| k)
+                            .collect::<Vec<_>>()
+                    });
+                    if let Some(ref telemetry_variants) = telemetry_variants {
+                        if telemetry_variants.is_empty() {
+                            continue;
+                        }
+                    }
+                    ui.separator();
+
+                    if let Some(extended) = node_info.extended_info_history.last() {
+                        let node_id_str = node_info.node_id.to_string();
+                        ui.horizontal(|ui| {
+                            if node_selected
+                                .map(|v| v == node_info.node_id)
+                                .unwrap_or(false)
+                            {
+                                ui.heading(
+                                    RichText::new("➧").color(Color32::from_rgb(0, 153, 255)),
+                                );
+                            }
+                            if node_id_str.ends_with(extended.short_name.as_str()) {
+                                ui.heading(node_id_str);
                             } else {
-                                ui.heading(node_info.node_id.to_string());
+                                ui.heading(format!("{} {}", node_id_str, extended.short_name));
                             }
-                            ui.add_space(5.0);
-                            ui.horizontal(|ui| {
-                                if !node_info.packet_statistics.is_empty() {
-                                    if ui.button("RSSI").clicked() {
-                                        next_page = Some(Panel::Rssi(
-                                            node_info.node_id,
-                                            Default::default(),
-                                        ));
-                                    }
-                                }
-                                if !node_info.gateway_for.is_empty() {
-                                    if ui
-                                        .button(format!("Gateway {}", node_info.gateway_for.len()))
-                                        .clicked()
-                                    {
-                                        next_page = Some(Panel::Gateways(
-                                            Some(node_info.node_id),
-                                            Default::default(),
-                                        ))
-                                    }
-                                }
-                            });
-                            ui.add_space(5.0);
-                            if let Some(telemetry_variants) = telemetry_variants {
-                                for telemetry_variant in telemetry_variants {
-                                    let position = self
-                                        .telemetry_enabled_for
-                                        .get(telemetry_variant)
-                                        .map(|v| v.iter().position(|v| v == &node_info.node_id))
-                                        .unwrap_or(None);
-                                    let mut enabled = position.is_some();
-
-                                    ui.checkbox(&mut enabled, telemetry_variant.to_string());
-
-                                    if enabled && position.is_none() {
-                                        self.telemetry_enabled_for
-                                            .entry(*telemetry_variant)
-                                            .or_insert(Default::default())
-                                            .push(node_info.node_id);
-                                    } else if !enabled {
-                                        if let Some(position) = position {
-                                            self.telemetry_enabled_for
-                                                .entry(*telemetry_variant)
-                                                .and_modify(|v| {
-                                                    v.swap_remove(position);
-                                                });
-                                        }
-                                    }
-                                }
+                        });
+                        if extended.long_name.len() > 0 {
+                            ui.label(extended.long_name.clone());
+                        }
+                    } else {
+                        ui.heading(node_info.node_id.to_string());
+                    }
+                    ui.add_space(5.0);
+                    ui.horizontal(|ui| {
+                        if !node_info.packet_statistics.is_empty() {
+                            if ui.button("RSSI").clicked() {
+                                next_page =
+                                    Some(Panel::Rssi(node_info.node_id, Default::default()));
                             }
-                            ui.add_space(10.0);
+                        }
+                        if !node_info.gateway_for.is_empty() {
+                            if ui
+                                .button(format!("Gateway {}", node_info.gateway_for.len()))
+                                .clicked()
+                            {
+                                next_page = Some(Panel::Gateways(
+                                    Some(node_info.node_id),
+                                    Default::default(),
+                                ))
+                            }
                         }
                     });
-                });
+                    ui.add_space(5.0);
+                    if let Some(telemetry_variants) = telemetry_variants {
+                        for telemetry_variant in telemetry_variants {
+                            let position = self
+                                .telemetry_enabled_for
+                                .get(telemetry_variant)
+                                .map(|v| v.iter().position(|v| v == &node_info.node_id))
+                                .unwrap_or(None);
+                            let mut enabled = position.is_some();
+
+                            ui.checkbox(&mut enabled, telemetry_variant.to_string());
+
+                            if enabled && position.is_none() {
+                                self.telemetry_enabled_for
+                                    .entry(*telemetry_variant)
+                                    .or_insert(Default::default())
+                                    .push(node_info.node_id);
+                            } else if !enabled {
+                                if let Some(position) = position {
+                                    self.telemetry_enabled_for
+                                        .entry(*telemetry_variant)
+                                        .and_modify(|v| {
+                                            v.swap_remove(position);
+                                        });
+                                }
+                            }
+                        }
+                    }
+                    ui.add_space(10.0);
+                }
             });
+        });
+
         next_page
     }
 }
 
 impl SoftNodeApp {
-    fn update_panel(&mut self, ctx: &egui::Context) -> Option<Panel> {
-        let list_panel = &mut self.persistent.list_panel;
-        let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
-
+    fn update_central_panel(&mut self, ctx: &egui::Context) {
         match &mut self.persistent.active_panel {
             Panel::Journal(journal) => {
-                if let Some(next_panel) =
-                    list_panel.ui(ctx, nodes_list, None, ListPanelFilter::None)
-                {
-                    return Some(next_panel);
-                }
                 egui::CentralPanel::default().show(ctx, |ui| journal.ui(ui, &self.journal));
             }
             Panel::Telemetry(telemetry) => {
-                if let Some(next_panel) =
-                    list_panel.ui(ctx, nodes_list, None, ListPanelFilter::Telemetry)
-                {
-                    return Some(next_panel);
-                }
                 egui::CentralPanel::default().show(ctx, |ui| {
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                     let mut telemetry_list = Vec::new();
@@ -574,6 +570,17 @@ impl SoftNodeApp {
             Panel::Settings(settings) => {
                 if settings.ui(ctx, &mut self.keyring) {
                     self.last_sync_point = None;
+                    std::mem::replace(
+                        &mut self.download_promise,
+                        go_download_promise(
+                            Default::default(),
+                            self.last_sync_point,
+                            self.download_state.clone(),
+                            ctx.clone(),
+                        ),
+                    )
+                    .abort();
+                    self.bootstrap_done = false;
                     self.nodes.clear();
                     self.journal.clear();
                     self.persistent.active_panel = Panel::Journal(Journal::new());
@@ -583,12 +590,6 @@ impl SoftNodeApp {
             Panel::Rssi(node_id, telemetry) => {
                 let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                 let mut telemetry_list = Vec::new();
-
-                if let Some(next_panel) =
-                    list_panel.ui(ctx, nodes_list, Some(*node_id), ListPanelFilter::None)
-                {
-                    return Some(next_panel);
-                }
 
                 if let Some(node_info) = &self.nodes.get(&node_id) {
                     // let mut snr = Vec::new();
@@ -680,12 +681,6 @@ impl SoftNodeApp {
                 }
             }
             Panel::Gateways(gateway_id, telemetry) => {
-                if let Some(next_panel) =
-                    list_panel.ui(ctx, nodes_list, *gateway_id, ListPanelFilter::Gateway)
-                {
-                    return Some(next_panel);
-                }
-
                 if let Some(gateway_info) = gateway_id.map(|v| self.nodes.get(&v)).flatten() {
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                     let mut max_rssi = f32::MIN;
@@ -749,12 +744,14 @@ impl SoftNodeApp {
                     });
                 }
             }
-            Panel::Map(map) => {
-                egui::CentralPanel::default()
-                    .show(ctx, |ui| map.ui(ui, &mut self.map_context, &self.nodes));
+            Panel::Map => {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.persistent
+                        .map
+                        .ui(ui, &mut self.map_context, &self.nodes)
+                });
             }
         };
-        None
     }
 }
 
@@ -769,64 +766,112 @@ impl eframe::App for SoftNodeApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.update_data(ctx);
+        {
+            let state = self.download_state.lock();
+            if !matches!(*state, DownloadState::Idle) {
+                egui::Area::new("Download State".into())
+                    .interactable(false)
+                    .anchor(egui::Align2::LEFT_BOTTOM, (6.0, -6.0))
+                    .show(ctx, |ui| {
+                        ui.add(
+                            egui::Label::new(format!("{}", *state))
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                        )
+                    });
+            }
+        }
+
+        if self.update_data(ctx) {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.label("Updating...");
+            });
+            return;
+        }
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
 
-            ui.horizontal(|ui| {
-                if ui
-                    .selectable_label(
-                        matches!(self.persistent.active_panel, Panel::Settings(_)),
-                        "⚙",
-                    )
-                    .clicked()
-                {
-                    self.persistent.active_panel = Panel::Settings(Settings::new(&self.keyring));
-                }
-                if ui
-                    .selectable_label(
-                        matches!(self.persistent.active_panel, Panel::Journal(_)),
-                        "Journal",
-                    )
-                    .clicked()
-                {
-                    self.persistent.active_panel = Panel::Journal(Journal::new());
-                }
-                if ui
-                    .selectable_label(
-                        matches!(self.persistent.active_panel, Panel::Telemetry(_)),
-                        "Telemetry",
-                    )
-                    .clicked()
-                {
-                    self.persistent.active_panel = Panel::Telemetry(Telemetry {});
-                }
+            egui::ScrollArea::horizontal()
+                .auto_shrink(true)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(
+                                matches!(self.persistent.active_panel, Panel::Settings(_)),
+                                "⚙",
+                            )
+                            .clicked()
+                        {
+                            self.persistent.active_panel =
+                                Panel::Settings(Settings::new(&self.keyring));
+                        }
+                        if ui
+                            .selectable_label(
+                                matches!(self.persistent.active_panel, Panel::Journal(_)),
+                                "Journal",
+                            )
+                            .clicked()
+                        {
+                            self.persistent.active_panel = Panel::Journal(Journal::new());
+                        }
+                        if ui
+                            .selectable_label(
+                                matches!(self.persistent.active_panel, Panel::Telemetry(_)),
+                                "Telemetry",
+                            )
+                            .clicked()
+                        {
+                            self.persistent.active_panel = Panel::Telemetry(Telemetry {});
+                        }
 
-                if ui
-                    .selectable_label(
-                        matches!(self.persistent.active_panel, Panel::Gateways(_, _)),
-                        "Gateways",
-                    )
-                    .clicked()
-                {
-                    self.persistent.active_panel = Panel::Gateways(None, Telemetry {});
-                }
+                        if ui
+                            .selectable_label(
+                                matches!(self.persistent.active_panel, Panel::Gateways(_, _)),
+                                "Gateways",
+                            )
+                            .clicked()
+                        {
+                            self.persistent.active_panel = Panel::Gateways(None, Telemetry {});
+                        }
 
-                if ui
-                    .selectable_label(matches!(self.persistent.active_panel, Panel::Map(_)), "Map")
-                    .clicked()
-                {
-                    self.persistent.active_panel = Panel::Map(Map::new());
-                }
-                let state = self.download_state.lock();
-                if !matches!(*state, DownloadState::Idle) {
-                    ui.label(format!("{}", *state));
-                }
-            })
+                        if ui
+                            .selectable_label(
+                                matches!(self.persistent.active_panel, Panel::Map),
+                                "Map",
+                            )
+                            .clicked()
+                        {
+                            self.persistent.active_panel = Panel::Map;
+                        }
+                    })
+                });
         });
 
-        if let Some(next_panel) = self.update_panel(ctx) {
-            self.persistent.active_panel = next_panel;
+        let list_panel = &mut self.persistent.list_panel;
+        if ctx.content_rect().width() > 400.0 {
+            if list_panel.show {
+                let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
+                egui::SidePanel::left("Roster").show(ctx, |ui| {
+                    if let Some(next_panel) =
+                        list_panel.ui(ui, nodes_list, None, ListPanelFilter::None)
+                    {
+                        self.persistent.active_panel = next_panel;
+                    }
+                });
+            }
+            self.update_central_panel(ctx);
+        } else {
+            if list_panel.show {
+                let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    if let Some(next_panel) =
+                        list_panel.ui(ui, nodes_list, None, ListPanelFilter::None)
+                    {
+                        self.persistent.active_panel = next_panel;
+                    }
+                });
+            } else {
+                self.update_central_panel(ctx);
+            }
         }
     }
 }
