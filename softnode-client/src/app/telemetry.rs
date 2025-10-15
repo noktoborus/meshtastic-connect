@@ -90,12 +90,15 @@ impl Telemetry {
             egui_plot::AxisHints::new_x().formatter(|a, b| tf.format(a, b)),
         ];
 
+        let legend = egui_plot::Legend::default()
+            .position(egui_plot::Corner::LeftTop)
+            .follow_insertion_order(true);
+
         let legend = if let Some(title) = title {
-            egui_plot::Legend::default().title(title.as_str())
+            legend.title(title.as_str())
         } else {
-            egui_plot::Legend::default()
-        }
-        .follow_insertion_order(true);
+            legend
+        };
 
         let legend_plot = egui_plot::Plot::new("telemetry_plot")
             .legend(legend)

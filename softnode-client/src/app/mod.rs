@@ -6,7 +6,7 @@ pub mod settings;
 mod telemetry;
 use std::{collections::HashMap, f32, ops::ControlFlow, sync::Arc};
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use data::{JournalData, NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
 use egui::{Color32, RichText, mutex::Mutex};
 use journal::Journal;
@@ -27,6 +27,7 @@ enum Panel {
     Map,
 }
 
+#[derive(Clone, Copy)]
 pub enum DownloadState {
     Idle,
     WaitHeader,
@@ -34,17 +35,22 @@ pub enum DownloadState {
     Download,
     // Known full size
     DownloadWithSize(f32, usize),
+    Parse,
+    // Hold to next download action
+    Delay,
 }
 
 impl std::fmt::Display for DownloadState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DownloadState::Idle => write!(f, "Idle"),
-            DownloadState::WaitHeader => write!(f, "Waiting"),
-            DownloadState::Download => write!(f, "Downloading"),
-            DownloadState::DownloadWithSize(done_percent, _) => {
+            Self::Idle => write!(f, "Idle"),
+            Self::WaitHeader => write!(f, "Waiting headers"),
+            Self::Download => write!(f, "Downloading"),
+            Self::DownloadWithSize(done_percent, _) => {
                 write!(f, "Downloading {:.2}%", done_percent)
             }
+            Self::Parse => write!(f, "Parsing"),
+            Self::Delay => write!(f, "Resting"),
         }
     }
 }
@@ -61,7 +67,7 @@ pub struct PersistentData {
 
     list_panel: ListPanel,
     map: MapPanel,
-    update_interval_secs: Duration,
+    update_interval_secs: std::time::Duration,
 }
 
 pub struct SoftNodeApp {
@@ -79,7 +85,7 @@ pub struct SoftNodeApp {
     persistent: PersistentData,
     bootstrap_done: bool,
     download_state: Arc<Mutex<DownloadState>>,
-    download_promise: poll_promise::Promise<DownloadPromiseResult>,
+    download_data: Arc<Mutex<Vec<StoredMeshPacket>>>,
 }
 
 impl Default for PersistentData {
@@ -88,7 +94,7 @@ impl Default for PersistentData {
             active_panel: Panel::Journal(Journal::new()),
             list_panel: Default::default(),
             map: Default::default(),
-            update_interval_secs: Duration::seconds(5),
+            update_interval_secs: std::time::Duration::from_secs(5),
         }
     }
 }
@@ -148,107 +154,118 @@ impl SoftNodeApp {
             .flatten()
             .unwrap_or_else(|| default_keyring());
 
+        let persistent = PersistentData::new(cc);
         let download_state: Arc<Mutex<DownloadState>> = Default::default();
+        let download_data: Arc<Mutex<Vec<StoredMeshPacket>>> = Default::default();
+        go_download(
+            persistent.update_interval_secs,
+            Default::default(),
+            download_state.clone(),
+            download_data.clone(),
+            cc.egui_ctx.clone(),
+        );
         Self {
             journal: Default::default(),
             nodes: Default::default(),
             last_sync_point: Default::default(),
             map_context: MapContext::new(cc.egui_ctx.clone()),
-            download_state: download_state.clone(),
+            download_state,
+            download_data,
             keyring,
-            persistent: PersistentData::new(cc),
+            persistent,
             bootstrap_done: false,
-            download_promise: go_download_promise(
-                std::time::Duration::default(),
-                Default::default(),
-                download_state,
-                cc.egui_ctx.clone(),
-            ),
         }
     }
 }
 
-type DownloadPromiseResult = Vec<StoredMeshPacket>;
+#[cfg(not(target_arch = "wasm32"))]
+fn run_after(delay: std::time::Duration, f: impl FnOnce() + Send + 'static) {
+    std::thread::spawn(move || {
+        std::thread::sleep(delay);
+        f();
+    });
+}
 
-fn go_download_promise(
-    delay: std::time::Duration,
+#[cfg(target_arch = "wasm32")]
+fn run_after(delay: std::time::Duration, f: impl FnOnce() + Send + 'static) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = wasmtimer::tokio::sleep(delay).await;
+        f();
+    });
+}
+
+fn go_download(
+    delay_if_no_data: std::time::Duration,
     last_sync_point: Option<u64>,
     state: Arc<Mutex<DownloadState>>,
+    data: Arc<Mutex<Vec<StoredMeshPacket>>>,
     egui_ctx: egui::Context,
-) -> poll_promise::Promise<DownloadPromiseResult> {
-    poll_promise::Promise::spawn_thread("background http sync", move || {
-        if !delay.is_zero() {
-            log::info!("sync delay for {:?}", delay);
-            std::thread::sleep(delay);
-        }
+) {
+    *state.lock() = DownloadState::WaitHeader;
+    let api_url = format!("{}{}", env!("SOFTNODE_API_URL_BASE"), "/sync");
+    let request = if let Some(sync_point) = last_sync_point {
+        ehttp::Request::get(format!("{}?start={}", api_url, sync_point))
+    } else {
+        ehttp::Request::get(&api_url)
+    };
 
-        let api_url = format!("{}{}", env!("SOFTNODE_API_URL_BASE"), "/sync");
-        let request = if let Some(sync_point) = last_sync_point {
-            ehttp::Request::get(format!("{}?start={}", api_url, sync_point))
-        } else {
-            ehttp::Request::get(&api_url)
-        };
+    let inner_state = state.clone();
+    let body = Arc::new(Mutex::new(Vec::new()));
+    let inner_body = body.clone();
+    log::info!("Fetching data: {} ...", api_url);
+    ehttp::streaming::fetch(
+        request,
+        Box::new(move |part| {
+            let part = match part {
+                Err(err) => {
+                    log::error!("Fetching error: {}", err);
+                    return ControlFlow::Break(());
+                }
+                Ok(part) => part,
+            };
 
-        *state.lock() = DownloadState::WaitHeader;
-        let inner_state = state.clone();
-        let body = Arc::new(Mutex::new(Vec::new()));
-        let inner_body = body.clone();
-        log::info!("Fetching data: {} ...", api_url);
-        ehttp::streaming::fetch_streaming_blocking(
-            request,
-            Box::new(move |part| {
-                let part = match part {
-                    Err(err) => {
-                        log::error!("Fetching error: {}", err);
-                        return ControlFlow::Break(());
-                    }
-                    Ok(part) => part,
-                };
-
-                match part {
-                    ehttp::streaming::Part::Response(response) => match response.status {
-                        200 => {
-                            match response
-                                .headers
-                                .get("Content-Length")
-                                .ok_or_else(|| "No Content-Length".to_string())
-                                .map(|v| {
-                                    v.parse::<usize>()
-                                        .map_err(|e| format!("Content-Length parse problem: {e}"))
-                                })
-                                .flatten()
-                            {
-                                Ok(length) => {
-                                    *inner_state.lock() =
-                                        DownloadState::DownloadWithSize(0.0, length);
-                                    log::info!("Fetching length: len={}", length);
-                                }
-                                Err(e) => {
-                                    *inner_state.lock() = DownloadState::Download;
-                                    log::error!(
-                                        "Fetching length error: {}, continue download without length",
-                                        e
-                                    )
-                                }
+            match part {
+                ehttp::streaming::Part::Response(response) => match response.status {
+                    200 => {
+                        match response
+                            .headers
+                            .get("Content-Length")
+                            .ok_or_else(|| "No Content-Length".to_string())
+                            .map(|v| {
+                                v.parse::<usize>()
+                                    .map_err(|e| format!("Content-Length parse problem: {e}"))
+                            })
+                            .flatten()
+                        {
+                            Ok(length) => {
+                                *inner_state.lock() = DownloadState::DownloadWithSize(0.0, length);
+                                log::info!("Fetching length: len={}", length);
                             }
-                            ControlFlow::Continue(())
+                            Err(e) => {
+                                *inner_state.lock() = DownloadState::Download;
+                                log::error!(
+                                    "Fetching length error: {}, continue download without length",
+                                    e
+                                )
+                            }
                         }
-                        _ => {
-                            log::error!(
-                                "Fetching error: status code={}: {}",
-                                response.status,
-                                response.status_text
-                            );
-                            *inner_state.lock() = DownloadState::Idle;
-                            ControlFlow::Break(())
-                        }
-                    },
-                    ehttp::streaming::Part::Chunk(chunk) => {
-                        let mut body = inner_body.lock();
-                        let mut state = inner_state.lock();
+                        ControlFlow::Continue(())
+                    }
+                    _ => {
+                        log::error!(
+                            "Fetching error: status code={}: {}",
+                            response.status,
+                            response.status_text
+                        );
+                        ControlFlow::Break(())
+                    }
+                },
+                ehttp::streaming::Part::Chunk(chunk) => {
+                    let mut body = inner_body.lock();
+                    if !chunk.is_empty() {
                         body.extend_from_slice(&chunk);
 
-                        let next_state = match *state {
+                        let next_state = match *inner_state.lock() {
                             DownloadState::Idle
                             | DownloadState::WaitHeader
                             | DownloadState::Download => DownloadState::Download,
@@ -258,49 +275,70 @@ fn go_download_promise(
                                     full_size,
                                 )
                             }
+                            DownloadState::Delay | DownloadState::Parse => unreachable!(),
                         };
-                        *state = next_state;
+                        *inner_state.lock() = next_state;
                         ControlFlow::Continue(())
+                    } else {
+                        if body.len() != 0 {
+                            *inner_state.lock() = DownloadState::Parse;
+                            match serde_json::from_slice::<Vec<StoredMeshPacket>>(body.as_slice()) {
+                                Ok(mut new_data) => {
+                                    log::info!("Fetched {} packets", new_data.len());
+                                    if new_data.is_empty() {
+                                        *state.lock() = DownloadState::Delay;
+                                        let state = state.clone();
+                                        let egui_ctx = egui_ctx.clone();
+                                        run_after(delay_if_no_data, move || {
+                                            *state.lock() = DownloadState::Idle;
+                                            egui_ctx.request_repaint();
+                                        });
+                                    } else {
+                                        data.lock().append(&mut new_data);
+                                        *state.lock() = DownloadState::Idle;
+                                        egui_ctx.request_repaint();
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Fetching json error: {}", e);
+                                    *inner_state.lock() = DownloadState::Delay;
+                                    let state = state.clone();
+                                    let egui_ctx = egui_ctx.clone();
+                                    run_after(delay_if_no_data, move || {
+                                        *state.lock() = DownloadState::Idle;
+                                        egui_ctx.request_repaint();
+                                    });
+                                }
+                            }
+                        } else {
+                            *inner_state.lock() = DownloadState::Delay;
+                            let state = state.clone();
+                            let egui_ctx = egui_ctx.clone();
+                            run_after(delay_if_no_data, move || {
+                                *state.lock() = DownloadState::Idle;
+                                egui_ctx.request_repaint();
+                            });
+                        }
+                        ControlFlow::Break(())
                     }
                 }
-            }),
-        );
-
-        *state.lock() = DownloadState::Idle;
-        let body = body.lock();
-        if body.len() != 0 {
-            match serde_json::from_slice::<Vec<StoredMeshPacket>>(body.as_slice()) {
-                Ok(body) => {
-                    log::info!("Fetched {} packets", body.len());
-                    egui_ctx.request_repaint();
-                    body
-                }
-                Err(e) => {
-                    log::error!("Fetching json error: {}", e);
-                    egui_ctx.request_repaint();
-                    Vec::new()
-                }
             }
-        } else {
-            egui_ctx.request_repaint();
-            Vec::new()
-        }
-    })
+        }),
+    );
 }
 
 impl SoftNodeApp {
     fn update_data(&mut self, ctx: &egui::Context) -> bool {
-        if let Some(promise_result) = self.download_promise.ready_mut() {
-            let next_delay = if promise_result.len() == 0 {
-                std::time::Duration::from_secs(5)
-            } else {
-                Default::default()
-            };
-            if let Some(last_record) = promise_result.last() {
+        let download_state = *self.download_state.lock();
+        if matches!(download_state, DownloadState::Delay)
+            || matches!(download_state, DownloadState::Idle)
+        {
+            let mut data: Vec<StoredMeshPacket> = self.download_data.lock().drain(..).collect();
+            if let Some(last_record) = data.last() {
                 self.last_sync_point = Some(last_record.sequence_number);
             }
 
-            for stored_mesh_packet in promise_result.drain(..) {
+            for stored_mesh_packet in data.drain(..) {
                 let node_id = stored_mesh_packet.header.from;
                 let stored_mesh_packet = stored_mesh_packet.decrypt(&self.keyring);
 
@@ -325,18 +363,18 @@ impl SoftNodeApp {
                 self.journal.push(stored_mesh_packet.clone().into());
             }
 
-            self.download_promise = go_download_promise(
-                next_delay,
-                self.last_sync_point,
-                self.download_state.clone(),
-                ctx.clone(),
-            );
-            if !next_delay.is_zero() {
-                self.bootstrap_done = true;
+            if matches!(download_state, DownloadState::Idle) {
+                go_download(
+                    self.persistent.update_interval_secs,
+                    self.last_sync_point,
+                    self.download_state.clone(),
+                    self.download_data.clone(),
+                    ctx.clone(),
+                );
             }
         }
 
-        !self.bootstrap_done
+        false
     }
 }
 
@@ -363,158 +401,154 @@ impl ListPanel {
     ) -> Option<Panel> {
         let mut next_page = None;
 
-        egui::Frame::new().inner_margin(3.0).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                egui::TextEdit::singleline(&mut self.filter)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("Search note by id or name")
-                    .show(ui)
-                    .response
-                    .request_focus();
-                ui.input(|i| {
-                    if i.key_pressed(egui::Key::Escape) {
-                        self.filter.clear();
+        ui.horizontal(|ui| {
+            egui::TextEdit::singleline(&mut self.filter)
+                .desired_width(f32::INFINITY)
+                .hint_text("Search note by id or name")
+                .show(ui)
+                .response
+                .request_focus();
+            ui.input(|i| {
+                if i.key_pressed(egui::Key::Escape) {
+                    self.show = false;
+                    self.filter.clear();
+                }
+            })
+        });
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            nodes.sort_by_key(|node_info| node_info.node_id);
+            for node_info in nodes {
+                if !self.filter.is_empty() {
+                    let filter = self.filter.to_uppercase();
+                    let mut skip = true;
+                    if node_info
+                        .node_id
+                        .to_string()
+                        .to_uppercase()
+                        .contains(filter.as_str())
+                    {
+                        skip = false;
                     }
-                })
-            });
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                nodes.sort_by_key(|node_info| node_info.node_id);
-                for node_info in nodes {
-                    if !self.filter.is_empty() {
-                        let filter = self.filter.to_uppercase();
-                        let mut skip = true;
-                        if node_info
-                            .node_id
-                            .to_string()
+                    if let Some(extended_info) = node_info.extended_info_history.last() {
+                        if extended_info
+                            .short_name
                             .to_uppercase()
                             .contains(filter.as_str())
                         {
                             skip = false;
                         }
-                        if let Some(extended_info) = node_info.extended_info_history.last() {
-                            if extended_info
-                                .short_name
-                                .to_uppercase()
-                                .contains(filter.as_str())
-                            {
-                                skip = false;
-                            }
-                            if extended_info
-                                .long_name
-                                .to_uppercase()
-                                .contains(filter.as_str())
-                            {
-                                skip = false;
-                            }
+                        if extended_info
+                            .long_name
+                            .to_uppercase()
+                            .contains(filter.as_str())
+                        {
+                            skip = false;
                         }
-                        if skip {
+                    }
+                    if skip {
+                        continue;
+                    }
+                }
+
+                let mut show_and_filter_by_telemetry = false;
+                match filter_by {
+                    ListPanelFilter::None => {}
+                    ListPanelFilter::Telemetry => {
+                        show_and_filter_by_telemetry = true;
+                    }
+                    ListPanelFilter::Gateway => {
+                        if node_info.gateway_for.is_empty() {
                             continue;
                         }
                     }
+                }
 
-                    let mut show_and_filter_by_telemetry = false;
-                    match filter_by {
-                        ListPanelFilter::None => {}
-                        ListPanelFilter::Telemetry => {
-                            show_and_filter_by_telemetry = true;
-                        }
-                        ListPanelFilter::Gateway => {
-                            if node_info.gateway_for.is_empty() {
-                                continue;
-                            }
-                        }
+                let telemetry_variants = show_and_filter_by_telemetry.then(|| {
+                    node_info
+                        .telemetry
+                        .iter()
+                        .map(|(k, v)| (k, v.len()))
+                        .filter(|(_, v)| *v > 1)
+                        .map(|(k, _)| k)
+                        .collect::<Vec<_>>()
+                });
+                if let Some(ref telemetry_variants) = telemetry_variants {
+                    if telemetry_variants.is_empty() {
+                        continue;
                     }
+                }
+                ui.separator();
 
-                    let telemetry_variants = show_and_filter_by_telemetry.then(|| {
-                        node_info
-                            .telemetry
-                            .iter()
-                            .map(|(k, v)| (k, v.len()))
-                            .filter(|(_, v)| *v > 1)
-                            .map(|(k, _)| k)
-                            .collect::<Vec<_>>()
-                    });
-                    if let Some(ref telemetry_variants) = telemetry_variants {
-                        if telemetry_variants.is_empty() {
-                            continue;
-                        }
-                    }
-                    ui.separator();
-
-                    if let Some(extended) = node_info.extended_info_history.last() {
-                        let node_id_str = node_info.node_id.to_string();
-                        ui.horizontal(|ui| {
-                            if node_selected
-                                .map(|v| v == node_info.node_id)
-                                .unwrap_or(false)
-                            {
-                                ui.heading(
-                                    RichText::new("➧").color(Color32::from_rgb(0, 153, 255)),
-                                );
-                            }
-                            if node_id_str.ends_with(extended.short_name.as_str()) {
-                                ui.heading(node_id_str);
-                            } else {
-                                ui.heading(format!("{} {}", node_id_str, extended.short_name));
-                            }
-                        });
-                        if extended.long_name.len() > 0 {
-                            ui.label(extended.long_name.clone());
-                        }
-                    } else {
-                        ui.heading(node_info.node_id.to_string());
-                    }
-                    ui.add_space(5.0);
+                if let Some(extended) = node_info.extended_info_history.last() {
+                    let node_id_str = node_info.node_id.to_string();
                     ui.horizontal(|ui| {
-                        if !node_info.packet_statistics.is_empty() {
-                            if ui.button("RSSI").clicked() {
-                                next_page =
-                                    Some(Panel::Rssi(node_info.node_id, Default::default()));
-                            }
+                        if node_selected
+                            .map(|v| v == node_info.node_id)
+                            .unwrap_or(false)
+                        {
+                            ui.heading(RichText::new("➧").color(Color32::from_rgb(0, 153, 255)));
                         }
-                        if !node_info.gateway_for.is_empty() {
-                            if ui
-                                .button(format!("Gateway {}", node_info.gateway_for.len()))
-                                .clicked()
-                            {
-                                next_page = Some(Panel::Gateways(
-                                    Some(node_info.node_id),
-                                    Default::default(),
-                                ))
-                            }
+                        if node_id_str.ends_with(extended.short_name.as_str()) {
+                            ui.heading(node_id_str);
+                        } else {
+                            ui.heading(format!("{} {}", node_id_str, extended.short_name));
                         }
                     });
-                    ui.add_space(5.0);
-                    if let Some(telemetry_variants) = telemetry_variants {
-                        for telemetry_variant in telemetry_variants {
-                            let position = self
-                                .telemetry_enabled_for
-                                .get(telemetry_variant)
-                                .map(|v| v.iter().position(|v| v == &node_info.node_id))
-                                .unwrap_or(None);
-                            let mut enabled = position.is_some();
+                    if extended.long_name.len() > 0 {
+                        ui.label(extended.long_name.clone());
+                    }
+                } else {
+                    ui.heading(node_info.node_id.to_string());
+                }
+                ui.add_space(5.0);
+                ui.horizontal(|ui| {
+                    if !node_info.packet_statistics.is_empty() {
+                        if ui.button("RSSI").clicked() {
+                            self.show = false;
+                            next_page = Some(Panel::Rssi(node_info.node_id, Default::default()));
+                        }
+                    }
+                    if !node_info.gateway_for.is_empty() {
+                        if ui
+                            .button(format!("Gateway {}", node_info.gateway_for.len()))
+                            .clicked()
+                        {
+                            self.show = false;
+                            next_page =
+                                Some(Panel::Gateways(Some(node_info.node_id), Default::default()))
+                        }
+                    }
+                });
+                ui.add_space(5.0);
+                if let Some(telemetry_variants) = telemetry_variants {
+                    for telemetry_variant in telemetry_variants {
+                        let position = self
+                            .telemetry_enabled_for
+                            .get(telemetry_variant)
+                            .map(|v| v.iter().position(|v| v == &node_info.node_id))
+                            .unwrap_or(None);
+                        let mut enabled = position.is_some();
 
-                            ui.checkbox(&mut enabled, telemetry_variant.to_string());
+                        ui.checkbox(&mut enabled, telemetry_variant.to_string());
 
-                            if enabled && position.is_none() {
+                        if enabled && position.is_none() {
+                            self.telemetry_enabled_for
+                                .entry(*telemetry_variant)
+                                .or_insert(Default::default())
+                                .push(node_info.node_id);
+                        } else if !enabled {
+                            if let Some(position) = position {
                                 self.telemetry_enabled_for
                                     .entry(*telemetry_variant)
-                                    .or_insert(Default::default())
-                                    .push(node_info.node_id);
-                            } else if !enabled {
-                                if let Some(position) = position {
-                                    self.telemetry_enabled_for
-                                        .entry(*telemetry_variant)
-                                        .and_modify(|v| {
-                                            v.swap_remove(position);
-                                        });
-                                }
+                                    .and_modify(|v| {
+                                        v.swap_remove(position);
+                                    });
                             }
                         }
                     }
-                    ui.add_space(10.0);
                 }
-            });
+                ui.add_space(10.0);
+            }
         });
 
         next_page
@@ -563,6 +597,7 @@ impl SoftNodeApp {
                     if telemetry_list.len() != 0 {
                         telemetry.ui(ui, start_datetime, telemetry_list, None, true, None)
                     } else {
+                        self.persistent.list_panel.show = true;
                         ui.label("Select a telemetry on left panel to display");
                     }
                 });
@@ -570,16 +605,15 @@ impl SoftNodeApp {
             Panel::Settings(settings) => {
                 if settings.ui(ctx, &mut self.keyring) {
                     self.last_sync_point = None;
-                    std::mem::replace(
-                        &mut self.download_promise,
-                        go_download_promise(
-                            Default::default(),
-                            self.last_sync_point,
-                            self.download_state.clone(),
-                            ctx.clone(),
-                        ),
-                    )
-                    .abort();
+                    self.download_state = Default::default();
+                    self.download_data = Default::default();
+                    go_download(
+                        self.persistent.update_interval_secs,
+                        self.last_sync_point,
+                        self.download_state.clone(),
+                        self.download_data.clone(),
+                        ctx.clone(),
+                    );
                     self.bootstrap_done = false;
                     self.nodes.clear();
                     self.journal.clear();
@@ -766,21 +800,6 @@ impl eframe::App for SoftNodeApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        {
-            let state = self.download_state.lock();
-            if !matches!(*state, DownloadState::Idle) {
-                egui::Area::new("Download State".into())
-                    .interactable(false)
-                    .anchor(egui::Align2::LEFT_BOTTOM, (6.0, -6.0))
-                    .show(ctx, |ui| {
-                        ui.add(
-                            egui::Label::new(format!("{}", *state))
-                                .wrap_mode(egui::TextWrapMode::Extend),
-                        )
-                    });
-            }
-        }
-
         if self.update_data(ctx) {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.label("Updating...");
@@ -790,70 +809,91 @@ impl eframe::App for SoftNodeApp {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
 
-            egui::ScrollArea::horizontal()
-                .auto_shrink(true)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        if ui
-                            .selectable_label(
-                                matches!(self.persistent.active_panel, Panel::Settings(_)),
-                                "⚙",
-                            )
-                            .clicked()
-                        {
-                            self.persistent.active_panel =
-                                Panel::Settings(Settings::new(&self.keyring));
-                        }
-                        if ui
-                            .selectable_label(
-                                matches!(self.persistent.active_panel, Panel::Journal(_)),
-                                "Journal",
-                            )
-                            .clicked()
-                        {
-                            self.persistent.active_panel = Panel::Journal(Journal::new());
-                        }
-                        if ui
-                            .selectable_label(
-                                matches!(self.persistent.active_panel, Panel::Telemetry(_)),
-                                "Telemetry",
-                            )
-                            .clicked()
-                        {
-                            self.persistent.active_panel = Panel::Telemetry(Telemetry {});
-                        }
+            egui::Frame::new().inner_margin(5.0).show(ui, |ui| {
+                egui::ScrollArea::horizontal()
+                    .auto_shrink(true)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            if ui
+                                .selectable_label(self.persistent.list_panel.show, "🔍")
+                                .clicked()
+                            {
+                                self.persistent.list_panel.show = !self.persistent.list_panel.show;
+                            }
 
-                        if ui
-                            .selectable_label(
-                                matches!(self.persistent.active_panel, Panel::Gateways(_, _)),
-                                "Gateways",
-                            )
-                            .clicked()
-                        {
-                            self.persistent.active_panel = Panel::Gateways(None, Telemetry {});
-                        }
+                            let menu_text = match self.persistent.active_panel {
+                                Panel::Journal(_) => "Journal".into(),
+                                Panel::Telemetry(_) => "Telemetry".into(),
+                                Panel::Settings(_) => "Settings".into(),
+                                Panel::Rssi(node_id, _) => {
+                                    format!("Outcome radio {}", node_id)
+                                }
+                                Panel::Gateways(node_id, _) => {
+                                    if node_id.is_some() {
+                                        format!("Income radio ({})", node_id.unwrap())
+                                    } else {
+                                        "Income radio".into()
+                                    }
+                                }
+                                Panel::Map => "Map".into(),
+                            };
 
-                        if ui
-                            .selectable_label(
-                                matches!(self.persistent.active_panel, Panel::Map),
-                                "Map",
-                            )
-                            .clicked()
-                        {
-                            self.persistent.active_panel = Panel::Map;
-                        }
-                    })
-                });
+                            ui.menu_button(menu_text, |ui| {
+                                if ui.button("Journal").clicked() {
+                                    self.persistent.active_panel = Panel::Journal(Journal::new());
+                                    self.persistent.list_panel.show = false;
+                                }
+
+                                if ui.button("Telemetry").clicked() {
+                                    self.persistent.active_panel = Panel::Telemetry(Telemetry {});
+                                    self.persistent.list_panel.show = false;
+                                }
+
+                                if ui.button("Map").clicked() {
+                                    self.persistent.active_panel = Panel::Map;
+                                    self.persistent.list_panel.show = false;
+                                }
+                            });
+
+                            let state = *self.download_state.lock();
+                            if !matches!(state, DownloadState::Delay) {
+                                ui.add(
+                                    egui::Label::new(format!("{}", state))
+                                        .wrap_mode(egui::TextWrapMode::Extend),
+                                );
+                            }
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                                if ui
+                                    .selectable_label(
+                                        matches!(self.persistent.active_panel, Panel::Settings(_)),
+                                        "⚙",
+                                    )
+                                    .clicked()
+                                {
+                                    self.persistent.active_panel =
+                                        Panel::Settings(Settings::new(&self.keyring));
+                                    self.persistent.list_panel.show = false;
+                                }
+                            });
+                        })
+                    });
+            });
         });
+
+        let panel_filter = match self.persistent.active_panel {
+            Panel::Journal(_) | Panel::Settings(_) | Panel::Rssi(_, _) => ListPanelFilter::None,
+            Panel::Telemetry(_) => ListPanelFilter::Telemetry,
+            Panel::Gateways(_, _) => ListPanelFilter::Gateway,
+            Panel::Map => ListPanelFilter::None,
+        };
 
         let list_panel = &mut self.persistent.list_panel;
         if ctx.content_rect().width() > 400.0 {
             if list_panel.show {
                 let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
                 egui::SidePanel::left("Roster").show(ctx, |ui| {
-                    if let Some(next_panel) =
-                        list_panel.ui(ui, nodes_list, None, ListPanelFilter::None)
-                    {
+                    if let Some(next_panel) = list_panel.ui(ui, nodes_list, None, panel_filter) {
                         self.persistent.active_panel = next_panel;
                     }
                 });
@@ -863,9 +903,7 @@ impl eframe::App for SoftNodeApp {
             if list_panel.show {
                 let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    if let Some(next_panel) =
-                        list_panel.ui(ui, nodes_list, None, ListPanelFilter::None)
-                    {
+                    if let Some(next_panel) = list_panel.ui(ui, nodes_list, None, panel_filter) {
                         self.persistent.active_panel = next_panel;
                     }
                 });
