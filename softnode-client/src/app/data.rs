@@ -262,7 +262,9 @@ pub struct PowerMetrics {
     current: f32,
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(
+    Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord,
+)]
 pub enum TelemetryVariant {
     BarometricPressure,
     Temperature,

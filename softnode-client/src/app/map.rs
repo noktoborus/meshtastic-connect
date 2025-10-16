@@ -1,10 +1,16 @@
 use std::collections::HashMap;
 
-use egui::Context;
+use chrono::{DateTime, Utc};
+use egui::{Color32, Context};
 use meshtastic_connect::keyring::node_id::NodeId;
-use walkers::{HttpTiles, MapMemory, lon_lat, sources::OpenStreetMap};
+use walkers::{
+    HttpTiles, MapMemory,
+    extras::{LabeledSymbol, LabeledSymbolStyle, Place, Symbol},
+    lon_lat,
+    sources::OpenStreetMap,
+};
 
-use crate::app::data::NodeInfo;
+use crate::app::data::{GatewayInfo, NodeInfo, TelemetryVariant};
 
 pub struct MapContext {
     tiles: HttpTiles,
@@ -18,18 +24,29 @@ impl MapContext {
     }
 }
 
+const TRANSPARENCY_MAX: u8 = 255;
+const TRANSPARENCY_MIN: u8 = 80;
+const TRANSPARENCY_RANGE_HOURS: u8 = 24;
+
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+pub struct Memory {
+    node_selected: Option<NodeId>,
+}
+
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct MapPanel {
     map_memory: MapMemory,
+    memory: Memory,
 }
 
 pub struct MapPointsPlugin<'a> {
     nodes: &'a HashMap<NodeId, NodeInfo>,
+    memory: &'a mut Memory,
 }
 
 impl<'a> MapPointsPlugin<'a> {
-    pub fn new(nodes: &'a HashMap<NodeId, NodeInfo>) -> Self {
-        Self { nodes }
+    pub fn new(nodes: &'a HashMap<NodeId, NodeInfo>, memory: &'a mut Memory) -> Self {
+        Self { nodes, memory }
     }
 }
 
@@ -37,18 +54,166 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
     fn run(
         self: Box<Self>,
         ui: &mut egui::Ui,
-        _response: &egui::Response,
+        response: &egui::Response,
         projector: &walkers::Projector,
         _map_memory: &MapMemory,
     ) {
+        let current_datetime = chrono::Utc::now();
         let painter = ui.painter();
-        for (_, node_info) in self.nodes {
-            if let Some(last_position) = node_info.position.last() {
-                let position = lon_lat(last_position.longitude, last_position.latitude);
-                let radius = 200.0 * projector.scale_pixel_per_meter(position);
-                let center = projector.project(position).to_pos2();
+        let clicked_pos = if response.clicked() {
+            if let Some(click_position) = response.hover_pos() {
+                Some(click_position)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        for (node_id, node_info) in self.nodes {
+            if let Some(position) = node_info.position.last() {
+                let position = lon_lat(position.longitude, position.latitude);
+                let on_screen_position = projector.project(position).to_pos2();
+                let label = if let Some(extended_info) = node_info.extended_info_history.last() {
+                    format!("{}\n{}", extended_info.short_name, node_info.node_id)
+                } else {
+                    node_info.node_id.to_string()
+                };
+                let radius = 10.0;
+                let symbol = Some(Symbol::Circle(String::from("👤")));
 
-                painter.circle_filled(center, radius, egui::Color32::BLACK);
+                let telemetry = [
+                    TelemetryVariant::Temperature,
+                    TelemetryVariant::Humidity,
+                    TelemetryVariant::Lux,
+                    TelemetryVariant::BarometricPressure,
+                    TelemetryVariant::Radiation,
+                ]
+                .iter()
+                .map(|variant| {
+                    node_info
+                        .telemetry
+                        .get(&variant)
+                        .map(|list_or_none| {
+                            list_or_none
+                                .last()
+                                .map(|value| match variant {
+                                    TelemetryVariant::Temperature => {
+                                        Some(format!("{:.2}°C", value.value))
+                                    }
+                                    TelemetryVariant::Humidity => {
+                                        Some(format!("{:.2}%", value.value))
+                                    }
+                                    TelemetryVariant::Lux => Some(format!("{:.2}lx", value.value)),
+                                    TelemetryVariant::BarometricPressure => {
+                                        Some(format!("{:.2}hPa", value.value))
+                                    }
+                                    TelemetryVariant::Radiation => {
+                                        Some(format!("{:.2}μSv/h", value.value))
+                                    }
+                                    _ => None,
+                                })
+                                .flatten()
+                        })
+                        .flatten()
+                })
+                .filter(|v| v.is_some())
+                .flatten()
+                .fold(String::new(), |a, b| a + b.as_str() + "\n");
+
+                let clicked = clicked_pos
+                    .map(|hover_pos| hover_pos.distance(on_screen_position) < radius * 1.8)
+                    .unwrap_or(false);
+
+                if clicked {
+                    self.memory.node_selected = Some(*node_id);
+                }
+
+                let selected = self
+                    .memory
+                    .node_selected
+                    .map(|v| v == *node_id)
+                    .unwrap_or(false);
+
+                let size = circle_radius(node_info.gateway_for.len());
+
+                let background = if selected {
+                    Color32::RED.gamma_multiply(0.4)
+                } else {
+                    Color32::WHITE.gamma_multiply(0.4)
+                };
+
+                if selected {
+                    for (node_id, gateway_info) in &node_info.gateway_for {
+                        if let Some(other_position) = self
+                            .nodes
+                            .get(node_id)
+                            .map(|node_info| node_info.position.last())
+                            .flatten()
+                            .map(|position| lon_lat(position.longitude, position.latitude))
+                        {
+                            let stroke =
+                                opaque_width(current_datetime, gateway_info.last(), Color32::RED);
+
+                            painter.line(
+                                vec![
+                                    on_screen_position,
+                                    projector.project(other_position).to_pos2(),
+                                ],
+                                stroke,
+                            );
+                        }
+                    }
+
+                    for (gateway_info, other_position) in self
+                        .nodes
+                        .values()
+                        .map(|node_info| {
+                            node_info
+                                .gateway_for
+                                .get(node_id)
+                                .map(|gateway_info| {
+                                    node_info.position.last().map(|position| {
+                                        (
+                                            gateway_info.last(),
+                                            lon_lat(position.longitude, position.latitude),
+                                        )
+                                    })
+                                })
+                                .flatten()
+                        })
+                        .filter(|v| v.is_some())
+                        .flatten()
+                    {
+                        let stroke = opaque_width(current_datetime, gateway_info, Color32::GREEN);
+
+                        painter.line(
+                            vec![
+                                on_screen_position,
+                                projector.project(other_position).to_pos2(),
+                            ],
+                            stroke,
+                        );
+                    }
+                }
+
+                let label = if !telemetry.is_empty() {
+                    format!("{}\n{}", telemetry, label)
+                } else {
+                    label
+                };
+
+                LabeledSymbol {
+                    position,
+                    label,
+                    symbol,
+                    style: LabeledSymbolStyle {
+                        label_corner_radius: radius,
+                        symbol_size: size,
+                        symbol_background: background,
+                        ..Default::default()
+                    },
+                }
+                .draw(ui, projector);
             }
         }
     }
@@ -61,7 +226,7 @@ impl MapPanel {
         map_context: &mut MapContext,
         nodes: &HashMap<NodeId, NodeInfo>,
     ) {
-        let map_nodes = MapPointsPlugin::new(nodes);
+        let map_nodes = MapPointsPlugin::new(nodes, &mut self.memory);
         let map = walkers::Map::new(
             Some(&mut map_context.tiles),
             &mut self.map_memory,
@@ -70,5 +235,46 @@ impl MapPanel {
         .with_plugin(map_nodes);
 
         ui.add(map);
+    }
+}
+
+fn circle_radius(gateway_for: usize) -> f32 {
+    const MIN: f32 = 16.0;
+    const MAX: f32 = 26.0;
+    const UPPER_NODES_LIMIT: usize = 100;
+
+    if gateway_for > UPPER_NODES_LIMIT {
+        MAX
+    } else {
+        MIN + (gateway_for as f32 / UPPER_NODES_LIMIT as f32) * (MAX - MIN)
+    }
+}
+
+fn opaque_width(
+    current_datetime: DateTime<Utc>,
+    gateway_info: Option<&GatewayInfo>,
+    base_color: Color32,
+) -> (f32, Color32) {
+    if let Some(gateway_info) = gateway_info {
+        let opaque = if current_datetime > gateway_info.timestamp {
+            let diff = gateway_info.timestamp - current_datetime;
+            let hours = diff.num_hours();
+
+            if hours as u8 > TRANSPARENCY_RANGE_HOURS {
+                TRANSPARENCY_MIN
+            } else {
+                TRANSPARENCY_MAX
+                    - (hours as u8 * (TRANSPARENCY_MAX - TRANSPARENCY_MIN)
+                        / TRANSPARENCY_RANGE_HOURS)
+            }
+        } else {
+            255
+        };
+        (
+            gateway_info.hop_limit as f32 + 1.0,
+            Color32::from_rgba_unmultiplied(base_color.r(), base_color.g(), base_color.b(), opaque),
+        )
+    } else {
+        (1.0, base_color)
     }
 }

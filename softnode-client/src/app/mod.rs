@@ -562,7 +562,8 @@ impl SoftNodeApp {
                 egui::CentralPanel::default().show(ctx, |ui| journal.ui(ui, &self.journal));
             }
             Panel::Telemetry(telemetry) => {
-                egui::CentralPanel::default().show(ctx, |ui| {
+                let frame = egui::Frame::default().inner_margin(0);
+                egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                     let mut telemetry_list = Vec::new();
 
@@ -779,7 +780,8 @@ impl SoftNodeApp {
                 }
             }
             Panel::Map => {
-                egui::CentralPanel::default().show(ctx, |ui| {
+                let frame = egui::Frame::default().inner_margin(0);
+                egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
                     self.persistent
                         .map
                         .ui(ui, &mut self.map_context, &self.nodes)

@@ -2,8 +2,8 @@
 setlocal enabledelayedexpansion
 
 
-REM set SOFTNODE_API_URL_BASE=https://softnode.styxheim.ru/api/softnode
-REM cargo run -p softnode-client
+set SOFTNODE_API_URL_BASE=https://softnode.styxheim.ru/api/softnode
+cargo run -p softnode-client
 
 REM cargo build --all
 REM IF ERRORLEVEL 1 (
