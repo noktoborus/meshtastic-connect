@@ -31,9 +31,15 @@ const TRANSPARENCY_MAX: u8 = 255;
 const TRANSPARENCY_MIN: u8 = 80;
 const TRANSPARENCY_RANGE_HOURS: u8 = 24;
 
-#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, PartialEq, Clone, Copy)]
+enum MemorySelection {
+    Node(NodeId),
+    Position(walkers::Position),
+}
+
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct Memory {
-    node_selected: Option<NodeId>,
+    selection: Option<MemorySelection>,
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
@@ -87,15 +93,11 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
     ) {
         let current_datetime = chrono::Utc::now();
         let painter = ui.painter();
-        let clicked_pos = if response.clicked() {
-            if let Some(click_position) = response.hover_pos() {
-                Some(click_position)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let clicked_pos = response.clicked().then(|| response.hover_pos()).flatten();
+        if clicked_pos.is_some() {
+            println!("clicked: {:?}", clicked_pos);
+            self.memory.selection = None;
+        }
         for (node_id, node_info) in self.nodes {
             if let Some(position) = self.fix_or_position(*node_id, &node_info.position) {
                 let on_screen_position = projector.project(position).to_pos2();
@@ -143,12 +145,6 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                 .flatten()
                 .fold(String::new(), |a, b| a + b.as_str() + "\n");
 
-                let selected = self
-                    .memory
-                    .node_selected
-                    .map(|v| v == *node_id)
-                    .unwrap_or(false);
-
                 let symbol = if node_info.gateway_for.is_empty() {
                     Some(Symbol::TwoCorners(String::from("👤")))
                 } else {
@@ -156,13 +152,30 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                 };
                 let radius = circle_radius(node_info.gateway_for.len());
 
-                let clicked = clicked_pos
-                    .map(|hover_pos| hover_pos.distance(on_screen_position) < radius * 1.8)
-                    .unwrap_or(false);
-
-                if clicked {
-                    self.memory.node_selected = Some(*node_id);
+                if let Some(clicked_pos) = clicked_pos {
+                    if clicked_pos.distance(on_screen_position) < radius * 1.8 {
+                        self.memory.selection = Some(MemorySelection::Node(*node_id));
+                    }
                 }
+
+                let selected = self
+                    .memory
+                    .selection
+                    .map(|selection| match selection {
+                        MemorySelection::Node(selected_node_id) => selected_node_id == *node_id,
+                        MemorySelection::Position(point) => {
+                            let point = projector.project(point).to_pos2();
+
+                            painter.circle(
+                                point,
+                                3.0,
+                                Color32::BLUE,
+                                (2.0, Color32::BLUE.gamma_multiply(0.8)),
+                            );
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
 
                 let background = if selected {
                     Color32::RED.gamma_multiply(0.4)
@@ -239,6 +252,13 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                     },
                 }
                 .draw(ui, projector);
+            }
+            if self.memory.selection.is_none()
+                && let Some(clicked_pos) = clicked_pos
+            {
+                self.memory.selection = Some(MemorySelection::Position(
+                    projector.unproject(clicked_pos.to_vec2()),
+                ));
             }
         }
     }
