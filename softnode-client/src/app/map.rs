@@ -10,7 +10,10 @@ use walkers::{
     sources::OpenStreetMap,
 };
 
-use crate::app::data::{GatewayInfo, NodeInfo, TelemetryVariant};
+use crate::app::{
+    data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
+    fix_gnss::FixGnssLibrary,
+};
 
 pub struct MapContext {
     tiles: HttpTiles,
@@ -42,11 +45,35 @@ pub struct MapPanel {
 pub struct MapPointsPlugin<'a> {
     nodes: &'a HashMap<NodeId, NodeInfo>,
     memory: &'a mut Memory,
+    fix_gnss: &'a FixGnssLibrary,
 }
 
 impl<'a> MapPointsPlugin<'a> {
-    pub fn new(nodes: &'a HashMap<NodeId, NodeInfo>, memory: &'a mut Memory) -> Self {
-        Self { nodes, memory }
+    pub fn new(
+        nodes: &'a HashMap<NodeId, NodeInfo>,
+        memory: &'a mut Memory,
+        fix_gnss: &'a FixGnssLibrary,
+    ) -> Self {
+        Self {
+            nodes,
+            memory,
+            fix_gnss,
+        }
+    }
+
+    fn fix_or_position(
+        &self,
+        node_id: NodeId,
+        positions: &Vec<Position>,
+    ) -> Option<walkers::Position> {
+        self.fix_gnss
+            .get(node_id)
+            .map(|fix| lon_lat(fix.longitude, fix.latitude))
+            .or_else(|| {
+                positions
+                    .last()
+                    .map(|pos| lon_lat(pos.longitude, pos.latitude))
+            })
     }
 }
 
@@ -70,17 +97,13 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
             None
         };
         for (node_id, node_info) in self.nodes {
-            if let Some(position) = node_info.position.last() {
-                let position = lon_lat(position.longitude, position.latitude);
+            if let Some(position) = self.fix_or_position(*node_id, &node_info.position) {
                 let on_screen_position = projector.project(position).to_pos2();
                 let label = if let Some(extended_info) = node_info.extended_info_history.last() {
                     format!("{}\n{}", extended_info.short_name, node_info.node_id)
                 } else {
                     node_info.node_id.to_string()
                 };
-                let radius = 10.0;
-                let symbol = Some(Symbol::Circle(String::from("👤")));
-
                 let telemetry = [
                     TelemetryVariant::Temperature,
                     TelemetryVariant::Humidity,
@@ -120,6 +143,19 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                 .flatten()
                 .fold(String::new(), |a, b| a + b.as_str() + "\n");
 
+                let selected = self
+                    .memory
+                    .node_selected
+                    .map(|v| v == *node_id)
+                    .unwrap_or(false);
+
+                let symbol = if node_info.gateway_for.is_empty() {
+                    Some(Symbol::TwoCorners(String::from("👤")))
+                } else {
+                    Some(Symbol::Circle(String::from("👤")))
+                };
+                let radius = circle_radius(node_info.gateway_for.len());
+
                 let clicked = clicked_pos
                     .map(|hover_pos| hover_pos.distance(on_screen_position) < radius * 1.8)
                     .unwrap_or(false);
@@ -127,14 +163,6 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                 if clicked {
                     self.memory.node_selected = Some(*node_id);
                 }
-
-                let selected = self
-                    .memory
-                    .node_selected
-                    .map(|v| v == *node_id)
-                    .unwrap_or(false);
-
-                let size = circle_radius(node_info.gateway_for.len());
 
                 let background = if selected {
                     Color32::RED.gamma_multiply(0.4)
@@ -147,9 +175,10 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                         if let Some(other_position) = self
                             .nodes
                             .get(node_id)
-                            .map(|node_info| node_info.position.last())
+                            .map(|node_info| {
+                                self.fix_or_position(node_info.node_id, &node_info.position)
+                            })
                             .flatten()
-                            .map(|position| lon_lat(position.longitude, position.latitude))
                         {
                             let stroke =
                                 opaque_width(current_datetime, gateway_info.last(), Color32::RED);
@@ -172,12 +201,8 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                                 .gateway_for
                                 .get(node_id)
                                 .map(|gateway_info| {
-                                    node_info.position.last().map(|position| {
-                                        (
-                                            gateway_info.last(),
-                                            lon_lat(position.longitude, position.latitude),
-                                        )
-                                    })
+                                    self.fix_or_position(node_info.node_id, &node_info.position)
+                                        .map(|position| (gateway_info.last(), position))
                                 })
                                 .flatten()
                         })
@@ -208,7 +233,7 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                     symbol,
                     style: LabeledSymbolStyle {
                         label_corner_radius: radius,
-                        symbol_size: size,
+                        symbol_size: radius,
                         symbol_background: background,
                         ..Default::default()
                     },
@@ -225,8 +250,9 @@ impl MapPanel {
         ui: &mut egui::Ui,
         map_context: &mut MapContext,
         nodes: &HashMap<NodeId, NodeInfo>,
+        fix_gnss: &FixGnssLibrary,
     ) {
-        let map_nodes = MapPointsPlugin::new(nodes, &mut self.memory);
+        let map_nodes = MapPointsPlugin::new(nodes, &mut self.memory, fix_gnss);
         let map = walkers::Map::new(
             Some(&mut map_context.tiles),
             &mut self.map_memory,
@@ -239,11 +265,11 @@ impl MapPanel {
 }
 
 fn circle_radius(gateway_for: usize) -> f32 {
-    const MIN: f32 = 16.0;
+    const MIN: f32 = 15.0;
     const MAX: f32 = 26.0;
     const UPPER_NODES_LIMIT: usize = 100;
 
-    if gateway_for > UPPER_NODES_LIMIT {
+    if gateway_for >= UPPER_NODES_LIMIT {
         MAX
     } else {
         MIN + (gateway_for as f32 / UPPER_NODES_LIMIT as f32) * (MAX - MIN)

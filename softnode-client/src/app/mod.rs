@@ -5,10 +5,12 @@ mod map;
 pub mod settings;
 mod telemetry;
 use std::{collections::HashMap, f32, ops::ControlFlow, sync::Arc};
+pub mod fix_gnss;
 
 use chrono::{DateTime, Utc};
 use data::{JournalData, NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
 use egui::{Color32, RichText, mutex::Mutex};
+use fix_gnss::FixGnssLibrary;
 use journal::Journal;
 use map::MapPanel;
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
@@ -81,6 +83,8 @@ pub struct SoftNodeApp {
     // but saved separately, to avoid keyring drop
     // when persistent structure is updated
     keyring: Keyring,
+    // GNSS fixes. Persistent as keyring data
+    fix_gnss: FixGnssLibrary,
     // Persistent data
     persistent: PersistentData,
     bootstrap_done: bool,
@@ -154,6 +158,12 @@ impl SoftNodeApp {
             .flatten()
             .unwrap_or_else(|| default_keyring());
 
+        let fix_gnss = cc
+            .storage
+            .map(|storage| eframe::get_value(storage, PERSISTENT_FIX_GNSS_KEY))
+            .flatten()
+            .unwrap_or_else(|| Default::default());
+
         let persistent = PersistentData::new(cc);
         let download_state: Arc<Mutex<DownloadState>> = Default::default();
         let download_data: Arc<Mutex<Vec<StoredMeshPacket>>> = Default::default();
@@ -172,6 +182,7 @@ impl SoftNodeApp {
             download_state,
             download_data,
             keyring,
+            fix_gnss,
             persistent,
             bootstrap_done: false,
         }
@@ -784,7 +795,7 @@ impl SoftNodeApp {
                 egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
                     self.persistent
                         .map
-                        .ui(ui, &mut self.map_context, &self.nodes)
+                        .ui(ui, &mut self.map_context, &self.nodes, &self.fix_gnss)
                 });
             }
         };
@@ -792,11 +803,13 @@ impl SoftNodeApp {
 }
 
 const PERSISTENT_KEYRING_KEY: &str = "keyring";
+const PERSISTENT_FIX_GNSS_KEY: &str = "fix_gnss";
 
 impl eframe::App for SoftNodeApp {
     /// Called by the framework to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, PERSISTENT_KEYRING_KEY, &self.keyring);
+        eframe::set_value(storage, PERSISTENT_FIX_GNSS_KEY, &self.fix_gnss);
         self.persistent.save(storage);
     }
 
