@@ -415,7 +415,7 @@ impl ListPanel {
         ui.horizontal(|ui| {
             egui::TextEdit::singleline(&mut self.filter)
                 .desired_width(f32::INFINITY)
-                .hint_text("Search note by id or name")
+                .hint_text("Search node by id or name")
                 .show(ui)
                 .response
                 .request_focus();
