@@ -43,7 +43,11 @@ impl FixGnssLibrary {
         self.0.entry(key)
     }
 
-    pub fn get(&self, key: NodeId) -> Option<&FixGnss> {
-        self.0.get(&key)
+    pub fn get(&self, key: &NodeId) -> Option<&FixGnss> {
+        self.0.get(key)
+    }
+
+    pub fn remove(&mut self, key: &NodeId) {
+        self.0.remove(key);
     }
 }

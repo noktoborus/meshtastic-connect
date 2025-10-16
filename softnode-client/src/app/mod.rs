@@ -407,6 +407,7 @@ impl ListPanel {
         &mut self,
         ui: &mut egui::Ui,
         mut nodes: Vec<&NodeInfo>,
+        mut additional: impl FnMut(&mut egui::Ui, &NodeInfo),
         node_selected: Option<NodeId>,
         filter_by: ListPanelFilter,
     ) -> Option<Panel> {
@@ -519,6 +520,7 @@ impl ListPanel {
                             next_page = Some(Panel::Rssi(node_info.node_id, Default::default()));
                         }
                     }
+
                     if !node_info.gateway_for.is_empty() {
                         if ui
                             .button(format!("Gateway {}", node_info.gateway_for.len()))
@@ -530,6 +532,7 @@ impl ListPanel {
                         }
                     }
                 });
+                additional(ui, node_info);
                 ui.add_space(5.0);
                 if let Some(telemetry_variants) = telemetry_variants {
                     for telemetry_variant in telemetry_variants {
@@ -908,7 +911,20 @@ impl eframe::App for SoftNodeApp {
             if list_panel.show {
                 let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
                 egui::SidePanel::left("Roster").show(ctx, |ui| {
-                    if let Some(next_panel) = list_panel.ui(ui, nodes_list, None, panel_filter) {
+                    if let Some(next_panel) = list_panel.ui(
+                        ui,
+                        nodes_list,
+                        |ui, node_info| {
+                            self.persistent.map.panel_ui(
+                                ui,
+                                node_info,
+                                &mut self.map_context,
+                                &mut self.fix_gnss,
+                            );
+                        },
+                        None,
+                        panel_filter,
+                    ) {
                         self.persistent.active_panel = next_panel;
                     }
                 });
@@ -918,7 +934,20 @@ impl eframe::App for SoftNodeApp {
             if list_panel.show {
                 let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    if let Some(next_panel) = list_panel.ui(ui, nodes_list, None, panel_filter) {
+                    if let Some(next_panel) = list_panel.ui(
+                        ui,
+                        nodes_list,
+                        |ui, node_info| {
+                            self.persistent.map.panel_ui(
+                                ui,
+                                node_info,
+                                &mut self.map_context,
+                                &mut self.fix_gnss,
+                            );
+                        },
+                        None,
+                        panel_filter,
+                    ) {
                         self.persistent.active_panel = next_panel;
                     }
                 });

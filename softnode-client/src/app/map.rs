@@ -12,7 +12,7 @@ use walkers::{
 
 use crate::app::{
     data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
-    fix_gnss::FixGnssLibrary,
+    fix_gnss::{FixGnss, FixGnssLibrary},
 };
 
 pub struct MapContext {
@@ -73,7 +73,7 @@ impl<'a> MapPointsPlugin<'a> {
         positions: &Vec<Position>,
     ) -> Option<walkers::Position> {
         self.fix_gnss
-            .get(node_id)
+            .get(&node_id)
             .map(|fix| lon_lat(fix.longitude, fix.latitude))
             .or_else(|| {
                 positions
@@ -281,6 +281,33 @@ impl MapPanel {
         .with_plugin(map_nodes);
 
         ui.add(map);
+    }
+
+    pub fn panel_ui<'a>(
+        &mut self,
+        ui: &mut egui::Ui,
+        node_info: &NodeInfo,
+        _map_context: &mut MapContext,
+        fix_gnss: &mut FixGnssLibrary,
+    ) {
+        if fix_gnss.get(&node_info.node_id).is_some() {
+            if ui.button("Unset FIX GNSS").clicked() {
+                fix_gnss.remove(&node_info.node_id);
+            }
+        } else if let Some(selection) = self.memory.selection {
+            match selection {
+                MemorySelection::Node(_) => {}
+                MemorySelection::Position(point) => {
+                    if ui.button("Set fixed coordinates").clicked() {
+                        fix_gnss.entry(node_info.node_id).or_insert(FixGnss {
+                            node_id: node_info.node_id,
+                            latitude: point.y(),
+                            longitude: point.x(),
+                        });
+                    }
+                }
+            }
+        }
     }
 }
 
