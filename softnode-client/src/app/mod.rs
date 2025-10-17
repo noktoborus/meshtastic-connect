@@ -67,7 +67,7 @@ impl Default for DownloadState {
 pub struct PersistentData {
     active_panel: Panel,
 
-    list_panel: ListPanel,
+    list_panel: Roster,
     map: MapPanel,
     update_interval_secs: std::time::Duration,
 }
@@ -396,18 +396,24 @@ enum ListPanelFilter {
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
-struct ListPanel {
+struct Roster {
     show: bool,
     telemetry_enabled_for: HashMap<TelemetryVariant, Vec<NodeId>>,
     filter: String,
 }
 
-impl ListPanel {
+enum PanelCommand {
+    Nothing,
+    // HideRoster,
+    NextPanel(Panel),
+}
+
+impl Roster {
     fn ui(
         &mut self,
         ui: &mut egui::Ui,
         mut nodes: Vec<&NodeInfo>,
-        mut additional: impl FnMut(&mut egui::Ui, &NodeInfo),
+        mut add_node_ui: impl FnMut(&mut egui::Ui, &NodeInfo) -> PanelCommand,
         node_selected: Option<NodeId>,
         filter_by: ListPanelFilter,
     ) -> Option<Panel> {
@@ -532,8 +538,22 @@ impl ListPanel {
                         }
                     }
                 });
-                additional(ui, node_info);
+                match add_node_ui(ui, node_info) {
+                    PanelCommand::Nothing => {}
+                    // PanelCommand::HideRoster => {
+                    //     self.show = false;
+                    //     ui.ctx().request_repaint();
+                    //     return;
+                    // }
+                    PanelCommand::NextPanel(panel) => {
+                        self.show = false;
+                        next_page = Some(panel);
+                        ui.ctx().request_repaint();
+                        return;
+                    }
+                }
                 ui.add_space(5.0);
+
                 if let Some(telemetry_variants) = telemetry_variants {
                     for telemetry_variant in telemetry_variants {
                         let position = self
@@ -796,9 +816,12 @@ impl SoftNodeApp {
             Panel::Map => {
                 let frame = egui::Frame::default().inner_margin(0);
                 egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
-                    self.persistent
-                        .map
-                        .ui(ui, &mut self.map_context, &self.nodes, &self.fix_gnss)
+                    self.persistent.map.ui(
+                        ui,
+                        &mut self.map_context,
+                        &self.nodes,
+                        &mut self.fix_gnss,
+                    )
                 });
             }
         };
@@ -915,12 +938,12 @@ impl eframe::App for SoftNodeApp {
                         ui,
                         nodes_list,
                         |ui, node_info| {
-                            self.persistent.map.panel_ui(
+                            self.persistent.map.panel_node_ui(
                                 ui,
                                 node_info,
                                 &mut self.map_context,
                                 &mut self.fix_gnss,
-                            );
+                            )
                         },
                         None,
                         panel_filter,
@@ -938,12 +961,12 @@ impl eframe::App for SoftNodeApp {
                         ui,
                         nodes_list,
                         |ui, node_info| {
-                            self.persistent.map.panel_ui(
+                            self.persistent.map.panel_node_ui(
                                 ui,
                                 node_info,
                                 &mut self.map_context,
                                 &mut self.fix_gnss,
-                            );
+                            )
                         },
                         None,
                         panel_filter,

@@ -349,6 +349,7 @@ pub struct GatewayInfo {
     pub timestamp: DateTime<Utc>,
     pub rx_info: Option<StoreMeshRxInfo>,
     pub hop_limit: u32,
+    pub hop_distance: Option<u32>,
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
@@ -595,10 +596,18 @@ impl NodeInfo {
                 None
             };
 
+            let hop_distance =
+                if stored_mesh_packet.header.hop_start >= stored_mesh_packet.header.hop_limit {
+                    Some(stored_mesh_packet.header.hop_start - stored_mesh_packet.header.hop_limit)
+                } else {
+                    None
+                };
+
             let gateway_info = GatewayInfo {
                 timestamp: stored_mesh_packet.store_timestamp,
                 rx_info,
                 hop_limit: stored_mesh_packet.header.hop_limit,
+                hop_distance,
             };
 
             let list = self
