@@ -100,7 +100,7 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                 }
             });
         }
-        let related_nodes = self
+        let received_nodes_by_gateway = self
             .memory
             .selection
             .map(|selection| {
@@ -133,85 +133,88 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                 } else {
                     node_info.node_id.to_string()
                 };
-                let telemetry = [
-                    TelemetryVariant::Temperature,
-                    TelemetryVariant::Humidity,
-                    TelemetryVariant::Lux,
-                    TelemetryVariant::BarometricPressure,
-                    TelemetryVariant::Radiation,
-                ]
-                .iter()
-                .map(|variant| {
-                    node_info
-                        .telemetry
-                        .get(&variant)
-                        .map(|list_or_none| {
-                            list_or_none
-                                .last()
-                                .map(|value| match variant {
-                                    TelemetryVariant::Temperature => {
-                                        Some(format!("{:.2}°C", value.value))
-                                    }
-                                    TelemetryVariant::Humidity => {
-                                        Some(format!("{:.2}%", value.value))
-                                    }
-                                    TelemetryVariant::Lux => Some(format!("{:.2}lx", value.value)),
-                                    TelemetryVariant::BarometricPressure => {
-                                        Some(format!("{:.2}hPa", value.value))
-                                    }
-                                    TelemetryVariant::Radiation => {
-                                        Some(format!("{:.2}μSv/h", value.value))
-                                    }
-                                    _ => None,
-                                })
-                                .flatten()
-                        })
-                        .flatten()
-                })
-                .filter(|v| v.is_some())
-                .flatten();
 
-                let gateway_text = if let Some(gateway_info) = related_nodes
+                let node_received_by_gateway = received_nodes_by_gateway
                     .map(|nodes| {
                         nodes
                             .get(node_id)
                             .map(|gateway_info| gateway_info.last())
                             .flatten()
                     })
-                    .flatten()
+                    .flatten();
+
+                let (extended_label, symbol) = if let Some(gateway_info) = node_received_by_gateway
                 {
                     let mut text = Vec::new();
 
                     if let Some(rx_info) = &gateway_info.rx_info {
-                        text.push(format!(
-                            "RSSI/SNR: {:.2} dB/{:.2} dB",
-                            rx_info.rx_rssi, rx_info.rx_snr
-                        ));
-                    }
-                    if let Some(hops_away) = gateway_info.hop_distance {
-                        text.push(format!(
-                            "Hops limit: {} (away: {})",
-                            gateway_info.hop_limit, hops_away
-                        ));
-                    } else {
-                        text.push(format!("Hops limit: {}", gateway_info.hop_limit));
+                        text.push(format!("RSSI: {:.2} dB", rx_info.rx_rssi));
+                        text.push(format!("SNR: {:.2} dB", rx_info.rx_snr));
                     }
 
-                    text
+                    text.push(format!("Hops limit: {}", gateway_info.hop_limit));
+
+                    let symbol = if let Some(hops_away) = gateway_info.hop_distance {
+                        hops_away.to_string()
+                    } else {
+                        "👤".to_string()
+                    };
+                    let text = text
+                        .iter()
+                        .fold(String::new(), |a, b| a + b.as_str() + "\n");
+                    (text, symbol)
+                } else if received_nodes_by_gateway.is_some() {
+                    (String::new(), "👤".to_string())
                 } else {
-                    Vec::new()
+                    (
+                        [
+                            TelemetryVariant::Temperature,
+                            TelemetryVariant::Humidity,
+                            TelemetryVariant::Lux,
+                            TelemetryVariant::BarometricPressure,
+                            TelemetryVariant::Radiation,
+                        ]
+                        .iter()
+                        .map(|variant| {
+                            node_info
+                                .telemetry
+                                .get(&variant)
+                                .map(|list_or_none| {
+                                    list_or_none
+                                        .last()
+                                        .map(|value| match variant {
+                                            TelemetryVariant::Temperature => {
+                                                Some(format!("{:.2}°C", value.value))
+                                            }
+                                            TelemetryVariant::Humidity => {
+                                                Some(format!("{:.2}%", value.value))
+                                            }
+                                            TelemetryVariant::Lux => {
+                                                Some(format!("{:.2}lx", value.value))
+                                            }
+                                            TelemetryVariant::BarometricPressure => {
+                                                Some(format!("{:.2}hPa", value.value))
+                                            }
+                                            TelemetryVariant::Radiation => {
+                                                Some(format!("{:.2}μSv/h", value.value))
+                                            }
+                                            _ => None,
+                                        })
+                                        .flatten()
+                                })
+                                .flatten()
+                        })
+                        .filter(|v| v.is_some())
+                        .flatten()
+                        .fold(String::new(), |a, b| a + b.as_str() + "\n"),
+                        "👤".to_string(),
+                    )
                 };
-                let telemetry = gateway_text
-                    .iter()
-                    .fold(String::new(), |a, b| a + b.as_str() + "\n")
-                    + telemetry
-                        .fold(String::new(), |a, b| a + b.as_str() + "\n")
-                        .as_str();
 
                 let symbol = if node_info.gateway_for.is_empty() {
-                    Some(Symbol::TwoCorners(String::from("👤")))
+                    Some(Symbol::TwoCorners(symbol))
                 } else {
-                    Some(Symbol::Circle(String::from("👤")))
+                    Some(Symbol::Circle(symbol))
                 };
                 let radius = circle_radius(node_info.gateway_for.len());
 
@@ -311,8 +314,8 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                     }
                 }
 
-                let label = if !telemetry.is_empty() {
-                    format!("{}\n{}", telemetry, label)
+                let label = if !extended_label.is_empty() {
+                    format!("{}\n{}", extended_label, label)
                 } else {
                     label
                 };
@@ -448,7 +451,7 @@ fn circle_radius(gateway_for: usize) -> f32 {
 }
 
 fn width_by_rssi(rssi: i32) -> f32 {
-    const RSSI_RANGE: [i32; 2] = [-130, 10];
+    const RSSI_RANGE: [i32; 2] = [-120, 10];
     const WIDTH_RANGE: [f32; 2] = [2.0, 12.0];
 
     if rssi <= RSSI_RANGE[0] {
