@@ -204,6 +204,96 @@ impl<'a> MapPointsPlugin<'a> {
         not_on_map_nodes
     }
 
+    fn draw_other_nodes(
+        self: Box<Self>,
+        ui: &mut egui::Ui,
+        projector: &walkers::Projector,
+        selected_node_info: &'a NodeInfo,
+        clicked_pos: Option<Pos2>,
+        current_datetime: DateTime<Utc>,
+    ) {
+        for (other_node_id, other_node_info) in self.nodes {
+            if let Some(position) =
+                fix_or_position(&self.fix_gnss, *other_node_id, &other_node_info.position)
+            {
+                let symbol_size = circle_radius(other_node_info.gateway_for.len());
+                let onscreen_position = projector.project(position).to_pos2();
+                if let Some(clicked_pos) = clicked_pos {
+                    if clicked_pos.distance(onscreen_position)
+                        < symbol_size * Self::SYMBOL_SIZE_SELECT_FACTOR
+                    {
+                        self.memory.selection = Some(MemorySelection::Node(*other_node_id));
+                        ui.ctx().request_repaint();
+                        return;
+                    }
+                }
+
+                let (symbol_label, label) = if let Some(gateway_info) = selected_node_info
+                    .gateway_for
+                    .get(other_node_id)
+                    .map(|v| v.last())
+                    .flatten()
+                {
+                    let (label, symbol) = if let Some(distance) = gateway_info.hop_distance {
+                        (format!("Hops away: {}", distance), distance.to_string())
+                    } else {
+                        (String::new(), "👤".to_string())
+                    };
+
+                    let label = gateway_info
+                        .rx_info
+                        .as_ref()
+                        .map(|rx_info| {
+                            format!(
+                                "RSSI: {}\nSNR: {}\n{}",
+                                rx_info.rx_rssi, rx_info.rx_snr, label
+                            )
+                        })
+                        .unwrap_or(label);
+
+                    let label = format_timediff(gateway_info.timestamp, current_datetime)
+                        .map(|v| format!("{}\n{}", label, v))
+                        .unwrap_or(label);
+
+                    let label = other_node_info
+                        .extended_info_history
+                        .last()
+                        .map(|extended_info| {
+                            format!(
+                                "{}\n{}\n{}",
+                                label, extended_info.short_name, other_node_info.node_id
+                            )
+                        })
+                        .unwrap_or(label);
+
+                    (symbol, label)
+                } else {
+                    ("👤".to_string(), "".to_string())
+                };
+
+                let symbol_background = Color32::WHITE.gamma_multiply(0.6);
+                let symbol = if other_node_info.gateway_for.is_empty() {
+                    Some(Symbol::TwoCorners(symbol_label))
+                } else {
+                    Some(Symbol::Circle(symbol_label))
+                };
+
+                LabeledSymbol {
+                    position,
+                    label,
+                    symbol,
+                    style: LabeledSymbolStyle {
+                        label_corner_radius: 10.0,
+                        symbol_size,
+                        symbol_background,
+                        ..Default::default()
+                    },
+                }
+                .draw(ui, projector);
+            }
+        }
+    }
+
     // Draw steps:
     // 1. Draw connection lines first
     // 2. Draw other nodes with RSSI/SNR/hops and without telemetry
@@ -273,86 +363,7 @@ impl<'a> MapPointsPlugin<'a> {
             Vec::new()
         };
 
-        for (other_node_id, other_node_info) in self.nodes {
-            if let Some(position) =
-                fix_or_position(&self.fix_gnss, *other_node_id, &other_node_info.position)
-            {
-                let symbol_size = circle_radius(other_node_info.gateway_for.len());
-                let onscreen_position = projector.project(position).to_pos2();
-                if let Some(clicked_pos) = clicked_pos {
-                    if clicked_pos.distance(onscreen_position)
-                        < symbol_size * Self::SYMBOL_SIZE_SELECT_FACTOR
-                    {
-                        self.memory.selection = Some(MemorySelection::Node(*other_node_id));
-                        ui.ctx().request_repaint();
-                        return;
-                    }
-                }
-
-                let (symbol_label, label) = if let Some(gateway_info) = node_info
-                    .gateway_for
-                    .get(other_node_id)
-                    .map(|v| v.last())
-                    .flatten()
-                {
-                    let (label, symbol) = if let Some(distance) = gateway_info.hop_distance {
-                        (format!("Hops away: {}", distance), distance.to_string())
-                    } else {
-                        (String::new(), "👤".to_string())
-                    };
-
-                    let label = gateway_info
-                        .rx_info
-                        .as_ref()
-                        .map(|rx_info| {
-                            format!(
-                                "RSSI: {}\nSNR: {}\n{}",
-                                rx_info.rx_rssi, rx_info.rx_snr, label
-                            )
-                        })
-                        .unwrap_or(label);
-
-                    let label = format_timediff(gateway_info.timestamp, current_datetime)
-                        .map(|v| format!("{}\n{}", label, v))
-                        .unwrap_or(label);
-
-                    let label = other_node_info
-                        .extended_info_history
-                        .last()
-                        .map(|extended_info| {
-                            format!(
-                                "{}\n{}\n{}",
-                                label, extended_info.short_name, other_node_info.node_id
-                            )
-                        })
-                        .unwrap_or(label);
-
-                    (symbol, label)
-                } else {
-                    ("👤".to_string(), "".to_string())
-                };
-
-                let symbol_background = Color32::WHITE.gamma_multiply(0.6);
-                let symbol = if other_node_info.gateway_for.is_empty() {
-                    Some(Symbol::TwoCorners(symbol_label))
-                } else {
-                    Some(Symbol::Circle(symbol_label))
-                };
-
-                LabeledSymbol {
-                    position,
-                    label,
-                    symbol,
-                    style: LabeledSymbolStyle {
-                        label_corner_radius: 10.0,
-                        symbol_size,
-                        symbol_background,
-                        ..Default::default()
-                    },
-                }
-                .draw(ui, projector);
-            }
-        }
+        self.draw_other_nodes(ui, projector, node_info, clicked_pos, current_datetime);
 
         let label = if let Some(extended_info) = node_info.extended_info_history.last() {
             format!("{}\n{}", extended_info.short_name, node_info.node_id)
