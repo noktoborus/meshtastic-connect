@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use egui::{Align2, Area, Button, Color32, Context, Id, Pos2, Rect, Vec2};
+use egui::{Align2, Area, Button, Color32, Context, Id, Pos2, Rect, Vec2, response};
 use meshtastic_connect::keyring::node_id::NodeId;
 use walkers::{
-    HttpTiles, MapMemory,
+    HttpTiles, Map, MapMemory,
     extras::{LabeledSymbol, LabeledSymbolStyle, Place, Symbol},
     lon_lat,
     sources::OpenStreetMap,
 };
 
 use crate::app::{
-    Panel, PanelCommand,
+    Panel, PanelCommand, color_generator,
     data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
     fix_gnss::{FixGnss, FixGnssLibrary},
 };
@@ -49,6 +49,7 @@ pub struct MapPointsPlugin<'a> {
     nodes: &'a HashMap<NodeId, NodeInfo>,
     memory: &'a mut Memory,
     fix_gnss: &'a mut FixGnssLibrary,
+    color_generator: color_generator::ColorGenerator,
 }
 
 impl<'a> MapPointsPlugin<'a> {
@@ -61,6 +62,7 @@ impl<'a> MapPointsPlugin<'a> {
             nodes,
             memory,
             fix_gnss,
+            color_generator: Default::default(),
         }
     }
 }
@@ -80,16 +82,333 @@ fn fix_or_position(
         })
 }
 
+fn get_telemetry_label(node_info: &NodeInfo) -> String {
+    [
+        TelemetryVariant::Temperature,
+        TelemetryVariant::Humidity,
+        TelemetryVariant::Lux,
+        TelemetryVariant::BarometricPressure,
+        TelemetryVariant::Radiation,
+    ]
+    .iter()
+    .map(|variant| {
+        node_info
+            .telemetry
+            .get(&variant)
+            .map(|list_or_none| {
+                list_or_none
+                    .last()
+                    .map(|value| match variant {
+                        TelemetryVariant::Temperature => Some(format!("{:.2} °C", value.value)),
+                        TelemetryVariant::Humidity => Some(format!("{:.2}%", value.value)),
+                        TelemetryVariant::Lux => Some(format!("{:.2} lx", value.value)),
+                        TelemetryVariant::BarometricPressure => {
+                            Some(format!("{:.2} hPa", value.value))
+                        }
+                        TelemetryVariant::Radiation => Some(format!("{:.2} μSv/h", value.value)),
+                        _ => None,
+                    })
+                    .flatten()
+            })
+            .flatten()
+    })
+    .filter(|v| v.is_some())
+    .flatten()
+    .fold(String::new(), |a, b| a + b.as_str() + "\n")
+}
+
+impl<'a> MapPointsPlugin<'a> {
+    const SYMBOL_SIZE_SELECT_FACTOR: f32 = 1.8;
+
+    fn draw_radiated_connections(
+        self: &mut Box<Self>,
+        ui: &mut egui::Ui,
+        onscreen_position: Pos2,
+        node_id: NodeId,
+        projector: &walkers::Projector,
+        current_datetime: DateTime<Utc>,
+    ) {
+        for (gateway_info, other_position) in self
+            .nodes
+            .values()
+            .map(|node_info| {
+                node_info
+                    .gateway_for
+                    .get(&node_id)
+                    .map(|gateway_info| {
+                        fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
+                            .map(|position| (gateway_info.last(), position))
+                    })
+                    .flatten()
+            })
+            .filter(|v| v.is_some())
+            .flatten()
+        {
+            draw_connection(
+                ui,
+                onscreen_position,
+                projector.project(other_position).to_pos2(),
+                current_datetime,
+                gateway_info,
+                self.color_generator.next_color(),
+            );
+        }
+    }
+
+    fn draw_received_connections(
+        self: &mut Box<Self>,
+        ui: &mut egui::Ui,
+        gateway_onscreen_position: Pos2,
+        gateway_node_info: &'a NodeInfo,
+        projector: &walkers::Projector,
+        current_datetime: DateTime<Utc>,
+    ) -> Vec<NodeId> {
+        let mut not_on_map_nodes = Vec::new();
+        for (node_id, gateway_info) in gateway_node_info.gateway_for.iter() {
+            let connection_color = self.color_generator.next_color();
+            if let Some(other_position) = self
+                .nodes
+                .get(node_id)
+                .map(|node_info| {
+                    fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
+                })
+                .flatten()
+            {
+                draw_connection(
+                    ui,
+                    gateway_onscreen_position,
+                    projector.project(other_position).to_pos2(),
+                    current_datetime,
+                    gateway_info.last(),
+                    connection_color,
+                );
+            } else {
+                not_on_map_nodes.push(*node_id);
+            }
+        }
+        not_on_map_nodes
+    }
+
+    // Draw steps:
+    // 1. Draw connection lines first
+    // 2. Draw other nodes with RSSI/SNR/hops and without telemetry
+    // 3. Draw selected nodes with gateway info and without telemetry
+    fn draw_selected(
+        mut self: Box<Self>,
+        ui: &mut egui::Ui,
+        response: &egui::Response,
+        projector: &walkers::Projector,
+        node_info: &'a NodeInfo,
+        clicked_pos: Option<Pos2>,
+    ) {
+        let is_gateway = !node_info.gateway_for.is_empty();
+        let current_datetime = chrono::Utc::now();
+        let position = fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
+            .unwrap_or(projector.unproject(response.rect.center().to_vec2()));
+        let symbol_size = circle_radius(node_info.gateway_for.len());
+        let onscreen_position = projector.project(position).to_pos2();
+        if let Some(clicked_pos) = clicked_pos {
+            if clicked_pos.distance(onscreen_position)
+                < symbol_size * Self::SYMBOL_SIZE_SELECT_FACTOR
+            {
+                self.memory.selection = Some(MemorySelection::Node(node_info.node_id));
+            }
+        }
+
+        let not_landed_nodes = if is_gateway {
+            self.draw_received_connections(
+                ui,
+                onscreen_position,
+                node_info,
+                projector,
+                current_datetime,
+            )
+        } else {
+            self.draw_radiated_connections(
+                ui,
+                onscreen_position,
+                node_info.node_id,
+                projector,
+                current_datetime,
+            );
+            Vec::new()
+        };
+
+        for (other_node_id, other_node_info) in self.nodes {
+            if let Some(position) =
+                fix_or_position(&self.fix_gnss, *other_node_id, &other_node_info.position)
+            {
+                let symbol_size = circle_radius(other_node_info.gateway_for.len());
+                let onscreen_position = projector.project(position).to_pos2();
+                if let Some(clicked_pos) = clicked_pos {
+                    if clicked_pos.distance(onscreen_position)
+                        < symbol_size * Self::SYMBOL_SIZE_SELECT_FACTOR
+                    {
+                        self.memory.selection = Some(MemorySelection::Node(*other_node_id));
+                        ui.ctx().request_repaint();
+                        return;
+                    }
+                }
+
+                let (symbol_label, label) = if let Some(gateway_info) = node_info
+                    .gateway_for
+                    .get(other_node_id)
+                    .map(|v| v.last())
+                    .flatten()
+                {
+                    let symbol = if let Some(distance) = gateway_info.hop_distance {
+                        distance.to_string()
+                    } else {
+                        "👤".to_string()
+                    };
+
+                    let label = gateway_info
+                        .rx_info
+                        .as_ref()
+                        .map(|rx_info| {
+                            format!("RSSI: {}\nSNR: {}", rx_info.rx_rssi, rx_info.rx_snr)
+                        })
+                        .unwrap_or(String::new());
+
+                    let label = other_node_info
+                        .extended_info_history
+                        .last()
+                        .map(|extended_info| {
+                            format!(
+                                "{}\n{}\n{}",
+                                label, extended_info.short_name, node_info.node_id
+                            )
+                        })
+                        .unwrap_or(label);
+
+                    (symbol, label)
+                } else {
+                    ("👤".to_string(), "".to_string())
+                };
+
+                let symbol_background = Color32::WHITE.gamma_multiply(0.6);
+                let symbol = if other_node_info.gateway_for.is_empty() {
+                    Some(Symbol::TwoCorners(symbol_label))
+                } else {
+                    Some(Symbol::Circle(symbol_label))
+                };
+
+                LabeledSymbol {
+                    position,
+                    label,
+                    symbol,
+                    style: LabeledSymbolStyle {
+                        label_corner_radius: 10.0,
+                        symbol_size,
+                        symbol_background,
+                        ..Default::default()
+                    },
+                }
+                .draw(ui, projector);
+            }
+        }
+
+        let label = if let Some(extended_info) = node_info.extended_info_history.last() {
+            format!("{}\n{}", extended_info.short_name, node_info.node_id)
+        } else {
+            node_info.node_id.to_string()
+        };
+        let label = if !not_landed_nodes.is_empty() {
+            format!(
+                "Received nodes: {}\nNowhere nodes: {}\n{}",
+                node_info.gateway_for.len(),
+                not_landed_nodes.len(),
+                label
+            )
+        } else {
+            label
+        };
+        let symbol_background = Color32::RED.gamma_multiply(0.6);
+        let symbol = if is_gateway {
+            Some(Symbol::Circle("👤".into()))
+        } else {
+            Some(Symbol::TwoCorners("👤".into()))
+        };
+
+        LabeledSymbol {
+            position,
+            label,
+            symbol,
+            style: LabeledSymbolStyle {
+                label_corner_radius: 10.0,
+                symbol_size,
+                symbol_background,
+                ..Default::default()
+            },
+        }
+        .draw(ui, projector);
+    }
+
+    // Simple draw if no node selected
+    fn draw_regular(
+        self: &mut Box<Self>,
+        ui: &mut egui::Ui,
+        projector: &walkers::Projector,
+        clicked_pos: Option<Pos2>,
+    ) {
+        for (node_id, node_info) in self.nodes {
+            let mesh_position = fix_or_position(&self.fix_gnss, *node_id, &node_info.position);
+            if let Some(position) = mesh_position {
+                let symbol_size = circle_radius(node_info.gateway_for.len());
+                let onscreen_position = projector.project(position).to_pos2();
+                if let Some(clicked_pos) = clicked_pos {
+                    if clicked_pos.distance(onscreen_position)
+                        < symbol_size * Self::SYMBOL_SIZE_SELECT_FACTOR
+                    {
+                        self.memory.selection = Some(MemorySelection::Node(*node_id));
+                        ui.ctx().request_repaint();
+                        return;
+                    }
+                }
+
+                let label = if let Some(extended_info) = node_info.extended_info_history.last() {
+                    format!("{}\n{}", extended_info.short_name, node_info.node_id)
+                } else {
+                    node_info.node_id.to_string()
+                };
+                let symbol_background = Color32::WHITE.gamma_multiply(0.6);
+                let symbol = if node_info.gateway_for.is_empty() {
+                    Some(Symbol::TwoCorners("👤".into()))
+                } else {
+                    Some(Symbol::Circle("👤".into()))
+                };
+                let telemetry_label = get_telemetry_label(&node_info);
+                let label = if telemetry_label.is_empty() {
+                    label
+                } else {
+                    format!("{}\n{}", telemetry_label, label)
+                };
+
+                LabeledSymbol {
+                    position,
+                    label,
+                    symbol,
+                    style: LabeledSymbolStyle {
+                        label_corner_radius: 10.0,
+                        symbol_size,
+                        symbol_background,
+                        ..Default::default()
+                    },
+                }
+                .draw(ui, projector);
+            }
+        }
+    }
+}
+
 impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
     fn run(
-        self: Box<Self>,
+        mut self: Box<Self>,
         ui: &mut egui::Ui,
         response: &egui::Response,
         projector: &walkers::Projector,
         _map_memory: &MapMemory,
     ) {
-        let mut not_on_map_nodes = Vec::new();
-        let current_datetime = chrono::Utc::now();
         let clicked_pos = response.clicked().then(|| response.hover_pos()).flatten();
         if clicked_pos.is_some() {
             self.memory.selection = None;
@@ -100,291 +419,25 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                 }
             });
         }
-        let received_nodes_by_gateway = self
+
+        let selection = self
             .memory
             .selection
             .map(|selection| {
                 if let MemorySelection::Node(selected_node_id) = selection {
                     self.nodes
                         .get(&selected_node_id)
-                        .map(|node_info| Some(&node_info.gateway_for))
-                        .flatten()
+                        .map(|selected_node_info| selected_node_info)
                 } else {
                     None
                 }
             })
             .flatten();
-        for (node_id, node_info) in self.nodes {
-            let selected = self
-                .memory
-                .selection
-                .map(|selection| match selection {
-                    MemorySelection::Node(selected_node_id) => selected_node_id == *node_id,
-                    MemorySelection::Position(_) => false,
-                })
-                .unwrap_or(false);
-            let mesh_position = fix_or_position(&self.fix_gnss, *node_id, &node_info.position);
-            if let Some(position) = mesh_position.or_else(|| {
-                selected.then_some(projector.unproject(response.rect.center().to_vec2()))
-            }) {
-                let onscreen_position = projector.project(position).to_pos2();
-                let label = if let Some(extended_info) = node_info.extended_info_history.last() {
-                    format!("{}\n{}", extended_info.short_name, node_info.node_id)
-                } else {
-                    node_info.node_id.to_string()
-                };
 
-                let node_received_by_gateway = received_nodes_by_gateway
-                    .map(|nodes| {
-                        nodes
-                            .get(node_id)
-                            .map(|gateway_info| gateway_info.last())
-                            .flatten()
-                    })
-                    .flatten();
-
-                let (extended_label, symbol) = if let Some(gateway_info) = node_received_by_gateway
-                {
-                    let mut text = Vec::new();
-
-                    if let Some(rx_info) = &gateway_info.rx_info {
-                        text.push(format!("RSSI: {:.2} dB", rx_info.rx_rssi));
-                        text.push(format!("SNR: {:.2} dB", rx_info.rx_snr));
-                    }
-
-                    text.push(format!("Hops limit: {}", gateway_info.hop_limit));
-
-                    let symbol = if let Some(hops_away) = gateway_info.hop_distance {
-                        hops_away.to_string()
-                    } else {
-                        "👤".to_string()
-                    };
-                    let text = text
-                        .iter()
-                        .fold(String::new(), |a, b| a + b.as_str() + "\n");
-                    (text, symbol)
-                } else if received_nodes_by_gateway.is_some() {
-                    (String::new(), "👤".to_string())
-                } else {
-                    (
-                        [
-                            TelemetryVariant::Temperature,
-                            TelemetryVariant::Humidity,
-                            TelemetryVariant::Lux,
-                            TelemetryVariant::BarometricPressure,
-                            TelemetryVariant::Radiation,
-                        ]
-                        .iter()
-                        .map(|variant| {
-                            node_info
-                                .telemetry
-                                .get(&variant)
-                                .map(|list_or_none| {
-                                    list_or_none
-                                        .last()
-                                        .map(|value| match variant {
-                                            TelemetryVariant::Temperature => {
-                                                Some(format!("{:.2}°C", value.value))
-                                            }
-                                            TelemetryVariant::Humidity => {
-                                                Some(format!("{:.2}%", value.value))
-                                            }
-                                            TelemetryVariant::Lux => {
-                                                Some(format!("{:.2}lx", value.value))
-                                            }
-                                            TelemetryVariant::BarometricPressure => {
-                                                Some(format!("{:.2}hPa", value.value))
-                                            }
-                                            TelemetryVariant::Radiation => {
-                                                Some(format!("{:.2}μSv/h", value.value))
-                                            }
-                                            _ => None,
-                                        })
-                                        .flatten()
-                                })
-                                .flatten()
-                        })
-                        .filter(|v| v.is_some())
-                        .flatten()
-                        .fold(String::new(), |a, b| a + b.as_str() + "\n"),
-                        "👤".to_string(),
-                    )
-                };
-
-                let symbol = if node_info.gateway_for.is_empty() {
-                    Some(Symbol::TwoCorners(symbol))
-                } else {
-                    Some(Symbol::Circle(symbol))
-                };
-                let radius = circle_radius(node_info.gateway_for.len());
-
-                if let Some(clicked_pos) = clicked_pos {
-                    if clicked_pos.distance(onscreen_position) < radius * 1.8 {
-                        self.memory.selection = Some(MemorySelection::Node(*node_id));
-                    }
-                }
-
-                let background = if selected {
-                    Color32::RED.gamma_multiply(0.4)
-                } else {
-                    Color32::WHITE.gamma_multiply(0.4)
-                };
-
-                if selected {
-                    if mesh_position.is_none() {
-                        let buttons_position =
-                            Pos2::new(onscreen_position.x, onscreen_position.y - 20.0);
-                        if ui
-                            .put(
-                                Rect::from_center_size(buttons_position, Vec2::new(140., 20.)),
-                                Button::new("Put here"),
-                            )
-                            .clicked()
-                        {
-                            self.fix_gnss
-                                .entry(*node_id)
-                                .and_modify(|v| {
-                                    v.longitude = position.x();
-                                    v.latitude = position.y();
-                                })
-                                .or_insert(FixGnss {
-                                    node_id: *node_id,
-                                    longitude: position.x(),
-                                    latitude: position.y(),
-                                });
-                        };
-                    }
-
-                    for (node_id, gateway_info) in &node_info.gateway_for {
-                        if let Some(other_position) = self
-                            .nodes
-                            .get(node_id)
-                            .map(|node_info| {
-                                fix_or_position(
-                                    &self.fix_gnss,
-                                    node_info.node_id,
-                                    &node_info.position,
-                                )
-                            })
-                            .flatten()
-                        {
-                            draw_connection(
-                                ui,
-                                onscreen_position,
-                                projector.project(other_position).to_pos2(),
-                                current_datetime,
-                                gateway_info.last(),
-                                Color32::RED,
-                            );
-                        } else {
-                            if let Some(gateway_info) = gateway_info.last() {
-                                not_on_map_nodes.push((node_id, gateway_info));
-                            }
-                        }
-                    }
-
-                    for (gateway_info, other_position) in self
-                        .nodes
-                        .values()
-                        .map(|node_info| {
-                            node_info
-                                .gateway_for
-                                .get(node_id)
-                                .map(|gateway_info| {
-                                    fix_or_position(
-                                        &self.fix_gnss,
-                                        node_info.node_id,
-                                        &node_info.position,
-                                    )
-                                    .map(|position| (gateway_info.last(), position))
-                                })
-                                .flatten()
-                        })
-                        .filter(|v| v.is_some())
-                        .flatten()
-                    {
-                        draw_connection(
-                            ui,
-                            onscreen_position,
-                            projector.project(other_position).to_pos2(),
-                            current_datetime,
-                            gateway_info,
-                            Color32::GREEN,
-                        );
-                    }
-                }
-
-                let label = if !extended_label.is_empty() {
-                    format!("{}\n{}", extended_label, label)
-                } else {
-                    label
-                };
-
-                LabeledSymbol {
-                    position,
-                    label,
-                    symbol,
-                    style: LabeledSymbolStyle {
-                        label_corner_radius: 10.0,
-                        symbol_size: radius,
-                        symbol_background: background,
-                        ..Default::default()
-                    },
-                }
-                .draw(ui, projector);
-            }
-            if self.memory.selection.is_none()
-                && let Some(clicked_pos) = clicked_pos
-            {
-                self.memory.selection = Some(MemorySelection::Position(
-                    projector.unproject(clicked_pos.to_vec2()),
-                ));
-            }
-        }
-
-        if !not_on_map_nodes.is_empty() {
-            let rect = ui.ctx().viewport_rect();
-
-            let nodes = |ui: &mut egui::Ui| {
-                for (node_id, _gateway_info) in not_on_map_nodes {
-                    let title = if let Some(extended) = self
-                        .nodes
-                        .get(node_id)
-                        .map(|node_info| node_info.extended_info_history.last())
-                        .flatten()
-                    {
-                        format!("{}\n{}", node_id, extended.short_name)
-                    } else {
-                        format!("{}\n", node_id)
-                    };
-                    if ui.add_sized((80.0, 32.0), Button::new(title)).clicked() {
-                        self.memory.selection = Some(MemorySelection::Node(*node_id));
-                    };
-                }
-            };
-
-            if rect.width() > rect.height() {
-                Area::new(Id::new("vertical_not_on_map_nodes"))
-                    .anchor(Align2::RIGHT_CENTER, (-40.0, 0.0))
-                    .show(ui.ctx(), |ui| {
-                        egui::ScrollArea::vertical()
-                            .auto_shrink([true, true])
-                            .show(ui, |ui| {
-                                ui.vertical(|ui| nodes(ui));
-                            });
-                    });
-            } else {
-                Area::new(Id::new("horizontal_not_on_map_nodes"))
-                    .anchor(Align2::CENTER_BOTTOM, (0.0, -20.0))
-                    .show(ui.ctx(), |ui| {
-                        egui::ScrollArea::horizontal()
-                            .auto_shrink([true, true])
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| nodes(ui));
-                                ui.add_space(8.0);
-                            });
-                    });
-            }
+        if let Some(selection) = selection {
+            self.draw_selected(ui, response, projector, selection, clicked_pos);
+        } else {
+            self.draw_regular(ui, projector, clicked_pos);
         }
     }
 }

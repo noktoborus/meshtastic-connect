@@ -5,6 +5,7 @@ mod map;
 pub mod settings;
 mod telemetry;
 use std::{collections::HashMap, f32, ops::ControlFlow, sync::Arc};
+pub mod color_generator;
 pub mod fix_gnss;
 
 use chrono::{DateTime, Utc};
