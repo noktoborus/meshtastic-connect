@@ -232,6 +232,16 @@ impl<'a> MapPointsPlugin<'a> {
                     .gateway_for
                     .get(other_node_id)
                     .map(|v| v.last())
+                    .or_else(|| {
+                        self.nodes
+                            .get(other_node_id)
+                            .map(|v| {
+                                v.gateway_for
+                                    .get(&selected_node_info.node_id)
+                                    .map(|v| v.last())
+                            })
+                            .flatten()
+                    })
                     .flatten()
                 {
                     let (label, symbol) = if let Some(distance) = gateway_info.hop_distance {
