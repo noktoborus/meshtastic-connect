@@ -209,10 +209,14 @@ impl<'a> MapPointsPlugin<'a> {
         ui: &mut egui::Ui,
         projector: &walkers::Projector,
         selected_node_info: &'a NodeInfo,
+        selected_is_gateway: bool,
         clicked_pos: Option<Pos2>,
         current_datetime: DateTime<Utc>,
     ) {
         for (other_node_id, other_node_info) in self.nodes {
+            if *other_node_id == selected_node_info.node_id {
+                continue;
+            }
             if let Some(position) =
                 fix_or_position(&self.fix_gnss, *other_node_id, &other_node_info.position)
             {
@@ -227,23 +231,24 @@ impl<'a> MapPointsPlugin<'a> {
                         return;
                     }
                 }
-
-                let (symbol_label, label) = if let Some(gateway_info) = selected_node_info
-                    .gateway_for
-                    .get(other_node_id)
-                    .map(|v| v.last())
-                    .or_else(|| {
-                        self.nodes
-                            .get(other_node_id)
-                            .map(|v| {
-                                v.gateway_for
-                                    .get(&selected_node_info.node_id)
-                                    .map(|v| v.last())
-                            })
-                            .flatten()
-                    })
-                    .flatten()
-                {
+                let possible_gateway_info = if selected_is_gateway {
+                    selected_node_info
+                        .gateway_for
+                        .get(other_node_id)
+                        .map(|v| v.last())
+                        .flatten()
+                } else {
+                    self.nodes
+                        .get(other_node_id)
+                        .map(|v| {
+                            v.gateway_for
+                                .get(&selected_node_info.node_id)
+                                .map(|v| v.last())
+                                .flatten()
+                        })
+                        .flatten()
+                };
+                let (symbol_label, label) = if let Some(gateway_info) = possible_gateway_info {
                     let (label, symbol) = if let Some(distance) = gateway_info.hop_distance {
                         (format!("Hops away: {}", distance), distance.to_string())
                     } else {
@@ -373,7 +378,14 @@ impl<'a> MapPointsPlugin<'a> {
             Vec::new()
         };
 
-        self.draw_other_nodes(ui, projector, node_info, clicked_pos, current_datetime);
+        self.draw_other_nodes(
+            ui,
+            projector,
+            node_info,
+            is_gateway,
+            clicked_pos,
+            current_datetime,
+        );
 
         let label = if let Some(extended_info) = node_info.extended_info_history.last() {
             format!("{}\n{}", extended_info.short_name, node_info.node_id)
@@ -390,7 +402,7 @@ impl<'a> MapPointsPlugin<'a> {
         //     .flatten()
         //     .unwrap_or(label);
 
-        let label = if !node_info.gateway_for.is_empty() {
+        let label = if is_gateway {
             if !not_landed_nodes.is_empty() {
                 format!(
                     "Heared nodes: {}\nNowhere nodes: {}\n{}",
