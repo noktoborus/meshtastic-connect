@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use egui::{Align2, Area, Button, Color32, Context, Id, Pos2, Rect, Vec2, response};
+use egui::{Button, Color32, Context, Pos2, Rect, Vec2};
 use meshtastic_connect::keyring::node_id::NodeId;
 use walkers::{
-    HttpTiles, Map, MapMemory,
+    HttpTiles, MapMemory,
     extras::{LabeledSymbol, LabeledSymbolStyle, Place, Symbol},
     lon_lat,
     sources::OpenStreetMap,
