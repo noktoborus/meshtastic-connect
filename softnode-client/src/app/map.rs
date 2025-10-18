@@ -82,6 +82,21 @@ fn fix_or_position(
         })
 }
 
+fn format_timediff(timestamp: DateTime<Utc>, current_datetime: DateTime<Utc>) -> Option<String> {
+    if timestamp < current_datetime {
+        let timediff = current_datetime - timestamp;
+        if timediff.num_hours() > 1 {
+            Some(format!("{} hours ago", timediff.num_hours()))
+        } else if timediff.num_minutes() > 1 {
+            Some(format!("{} minutes ago", timediff.num_minutes()))
+        } else {
+            Some(format!("{} seconds ago", timediff.num_seconds()))
+        }
+    } else {
+        None
+    }
+}
+
 fn get_telemetry_label(node_info: &NodeInfo) -> String {
     [
         TelemetryVariant::Temperature,
@@ -294,18 +309,9 @@ impl<'a> MapPointsPlugin<'a> {
                         })
                         .unwrap_or(String::new());
 
-                    let label = if gateway_info.timestamp < current_datetime {
-                        let timediff = current_datetime - gateway_info.timestamp;
-                        if timediff.num_hours() > 1 {
-                            format!("{}\n{} hours ago", label, timediff.num_hours())
-                        } else if timediff.num_minutes() > 1 {
-                            format!("{}\n{} minutes ago", label, timediff.num_minutes())
-                        } else {
-                            format!("{}\n{} seconds ago", label, timediff.num_seconds())
-                        }
-                    } else {
-                        label
-                    };
+                    let label = format_timediff(gateway_info.timestamp, current_datetime)
+                        .map(|v| format!("{}\n{}", label, v))
+                        .unwrap_or(label);
 
                     let label = other_node_info
                         .extended_info_history
@@ -350,6 +356,16 @@ impl<'a> MapPointsPlugin<'a> {
         } else {
             node_info.node_id.to_string()
         };
+
+        // let label = node_info
+        //     .packet_statistics
+        //     .last()
+        //     .map(|v| {
+        //         format_timediff(v.timestamp, current_datetime).map(|v| format!("{}\n{}", v, label))
+        //     })
+        //     .flatten()
+        //     .unwrap_or(label);
+
         let label = if !not_landed_nodes.is_empty() {
             format!(
                 "Received nodes: {}\nNowhere nodes: {}\n{}",
