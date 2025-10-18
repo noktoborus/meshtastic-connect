@@ -270,6 +270,19 @@ impl<'a> MapPointsPlugin<'a> {
                         })
                         .unwrap_or(String::new());
 
+                    let label = if gateway_info.timestamp < current_datetime {
+                        let timediff = current_datetime - gateway_info.timestamp;
+                        if timediff.num_hours() > 1 {
+                            format!("{}\n{} hours ago", label, timediff.num_hours())
+                        } else if timediff.num_minutes() > 1 {
+                            format!("{}\n{} minutes ago", label, timediff.num_minutes())
+                        } else {
+                            format!("{}\n{} seconds ago", label, timediff.num_seconds())
+                        }
+                    } else {
+                        label
+                    };
+
                     let label = other_node_info
                         .extended_info_history
                         .last()
