@@ -427,8 +427,8 @@ impl fmt::Display for meshtastic::User {
             f,
             "  🎭 Role: {}",
             meshtastic::config::device_config::Role::try_from(self.role)
-                .unwrap()
-                .as_str_name()
+                .map(|v| v.as_str_name().to_string())
+                .unwrap_or_else(|v| format!("<unknown: {v}>"))
         )?;
 
         writeln!(
