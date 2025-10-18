@@ -295,19 +295,22 @@ impl<'a> MapPointsPlugin<'a> {
                     .map(|v| v.last())
                     .flatten()
                 {
-                    let symbol = if let Some(distance) = gateway_info.hop_distance {
-                        distance.to_string()
+                    let (label, symbol) = if let Some(distance) = gateway_info.hop_distance {
+                        (format!("Hops away: {}", distance), distance.to_string())
                     } else {
-                        "👤".to_string()
+                        (String::new(), "👤".to_string())
                     };
 
                     let label = gateway_info
                         .rx_info
                         .as_ref()
                         .map(|rx_info| {
-                            format!("RSSI: {}\nSNR: {}", rx_info.rx_rssi, rx_info.rx_snr)
+                            format!(
+                                "RSSI: {}\nSNR: {}\n{}",
+                                rx_info.rx_rssi, rx_info.rx_snr, label
+                            )
                         })
-                        .unwrap_or(String::new());
+                        .unwrap_or(label);
 
                     let label = format_timediff(gateway_info.timestamp, current_datetime)
                         .map(|v| format!("{}\n{}", label, v))
@@ -319,7 +322,7 @@ impl<'a> MapPointsPlugin<'a> {
                         .map(|extended_info| {
                             format!(
                                 "{}\n{}\n{}",
-                                label, extended_info.short_name, node_info.node_id
+                                label, extended_info.short_name, other_node_info.node_id
                             )
                         })
                         .unwrap_or(label);
@@ -366,13 +369,17 @@ impl<'a> MapPointsPlugin<'a> {
         //     .flatten()
         //     .unwrap_or(label);
 
-        let label = if !not_landed_nodes.is_empty() {
-            format!(
-                "Received nodes: {}\nNowhere nodes: {}\n{}",
-                node_info.gateway_for.len(),
-                not_landed_nodes.len(),
-                label
-            )
+        let label = if !node_info.gateway_for.is_empty() {
+            if !not_landed_nodes.is_empty() {
+                format!(
+                    "Heared nodes: {}\nNowhere nodes: {}\n{}",
+                    node_info.gateway_for.len(),
+                    not_landed_nodes.len(),
+                    label
+                )
+            } else {
+                format!("Heared nodes: {}\n{}", node_info.gateway_for.len(), label)
+            }
         } else {
             label
         };
