@@ -203,8 +203,9 @@ impl<'a> MapPointsPlugin<'a> {
     ) {
         let is_gateway = !node_info.gateway_for.is_empty();
         let current_datetime = chrono::Utc::now();
-        let position = fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
-            .unwrap_or(projector.unproject(response.rect.center().to_vec2()));
+        let mesh_position = fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position);
+        let position =
+            mesh_position.unwrap_or(projector.unproject(response.rect.center().to_vec2()));
         let symbol_size = circle_radius(node_info.gateway_for.len());
         let onscreen_position = projector.project(position).to_pos2();
         if let Some(clicked_pos) = clicked_pos {
@@ -213,6 +214,29 @@ impl<'a> MapPointsPlugin<'a> {
             {
                 self.memory.selection = Some(MemorySelection::Node(node_info.node_id));
             }
+        }
+
+        if mesh_position.is_none() {
+            let buttons_position = Pos2::new(onscreen_position.x, onscreen_position.y - 20.0);
+            if ui
+                .put(
+                    Rect::from_center_size(buttons_position, Vec2::new(140., 20.)),
+                    Button::new("Put here"),
+                )
+                .clicked()
+            {
+                self.fix_gnss
+                    .entry(node_info.node_id)
+                    .and_modify(|v| {
+                        v.longitude = position.x();
+                        v.latitude = position.y();
+                    })
+                    .or_insert(FixGnss {
+                        node_id: node_info.node_id,
+                        longitude: position.x(),
+                        latitude: position.y(),
+                    });
+            };
         }
 
         let not_landed_nodes = if is_gateway {
@@ -481,20 +505,19 @@ impl MapPanel {
         _map_context: &mut MapContext,
         fix_gnss: &mut FixGnssLibrary,
     ) -> PanelCommand {
-        if fix_gnss.get(&node_info.node_id).is_some() {
-            if ui.button("Unfix GNSS").clicked() {
-                fix_gnss.remove(&node_info.node_id);
+        if let Some(position) = fix_or_position(fix_gnss, node_info.node_id, &node_info.position) {
+            if fix_gnss.get(&node_info.node_id).is_some() {
+                if ui.button("Move").clicked() {
+                    fix_gnss.remove(&node_info.node_id);
+                }
             }
-        } else if let Some(position) =
-            fix_or_position(fix_gnss, node_info.node_id, &node_info.position)
-        {
             if ui.button("Show map").clicked() {
                 self.memory.selection = Some(MemorySelection::Node(node_info.node_id));
                 self.map_memory.center_at(position);
                 return PanelCommand::NextPanel(Panel::Map);
             }
         } else {
-            if ui.button("Fix GNSS").clicked() {
+            if ui.button("Set position").clicked() {
                 self.memory.selection = Some(MemorySelection::Node(node_info.node_id));
                 return PanelCommand::NextPanel(Panel::Map);
             }
