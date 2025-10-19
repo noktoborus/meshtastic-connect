@@ -2,6 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use chrono::{DateTime, Utc};
 use egui::{Button, Color32, Context, Pos2, Rect, Vec2};
+use geo::{Distance, Haversine};
 use meshtastic_connect::keyring::node_id::NodeId;
 use walkers::{
     HttpTiles, MapMemory,
@@ -213,6 +214,7 @@ impl<'a> MapPointsPlugin<'a> {
         self: Box<Self>,
         ui: &mut egui::Ui,
         projector: &walkers::Projector,
+        selected_node_position: Option<walkers::Position>,
         selected_node_info: &'a NodeInfo,
         selected_is_gateway: bool,
         clicked_pos: Option<Pos2>,
@@ -274,6 +276,17 @@ impl<'a> MapPointsPlugin<'a> {
                     let label = format_timediff(gateway_info.timestamp, current_datetime)
                         .map(|v| format!("{}\n{}", label, v))
                         .unwrap_or(label);
+
+                    let label = if let Some(mesh_position) = selected_node_position {
+                        let distance = Haversine.distance(mesh_position, position);
+                        if distance > 1000.0 {
+                            format!("{}\nDistance: {:.3} km", label, distance / 1000.0)
+                        } else {
+                            format!("{}\nDistance: {:.2} m", label, distance)
+                        }
+                    } else {
+                        label
+                    };
 
                     let label = other_node_info
                         .extended_info_history
@@ -387,6 +400,7 @@ impl<'a> MapPointsPlugin<'a> {
         self.draw_other_nodes(
             ui,
             projector,
+            mesh_position,
             node_info,
             display_gatewayed_connections,
             clicked_pos,
