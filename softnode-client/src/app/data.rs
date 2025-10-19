@@ -352,6 +352,36 @@ pub struct GatewayInfo {
     pub hop_distance: Option<u32>,
 }
 
+impl From<&StoredMeshPacket> for GatewayInfo {
+    fn from(stored_mesh_packet: &StoredMeshPacket) -> Self {
+        let rx_info = if let Some(rx_info) = &stored_mesh_packet.header.rx {
+            if rx_info.rx_rssi > RSSI_UPPER_THRESHOLD || rx_info.rx_rssi < RSSI_LOWER_THRESHOLD {
+                None
+            } else if rx_info.rx_snr > SNR_UPPER_THRESHOLD || rx_info.rx_snr < SNR_LOWER_THRESHOLD {
+                None
+            } else {
+                Some(rx_info.clone())
+            }
+        } else {
+            None
+        };
+
+        let hop_distance =
+            if stored_mesh_packet.header.hop_start >= stored_mesh_packet.header.hop_limit {
+                Some(stored_mesh_packet.header.hop_start - stored_mesh_packet.header.hop_limit)
+            } else {
+                None
+            };
+
+        Self {
+            timestamp: stored_mesh_packet.store_timestamp,
+            rx_info,
+            hop_limit: stored_mesh_packet.header.hop_limit,
+            hop_distance,
+        }
+    }
+}
+
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct NodeInfo {
     pub node_id: NodeId,
@@ -360,6 +390,7 @@ pub struct NodeInfo {
     pub telemetry: HashMap<TelemetryVariant, Vec<NodeTelemetry>>,
     pub packet_statistics: Vec<NodePacket>,
     pub gateway_for: HashMap<NodeId, Vec<GatewayInfo>>,
+    pub gatewayed_by: HashMap<NodeId, GatewayInfo>,
 }
 
 macro_rules! push_statistic {
@@ -581,34 +612,7 @@ impl NodeInfo {
 
     pub fn update_as_gateway(&mut self, stored_mesh_packet: &StoredMeshPacket) {
         if self.node_id != stored_mesh_packet.header.from {
-            let rx_info = if let Some(rx_info) = &stored_mesh_packet.header.rx {
-                if rx_info.rx_rssi > RSSI_UPPER_THRESHOLD || rx_info.rx_rssi < RSSI_LOWER_THRESHOLD
-                {
-                    None
-                } else if rx_info.rx_snr > SNR_UPPER_THRESHOLD
-                    || rx_info.rx_snr < SNR_LOWER_THRESHOLD
-                {
-                    None
-                } else {
-                    Some(rx_info.clone())
-                }
-            } else {
-                None
-            };
-
-            let hop_distance =
-                if stored_mesh_packet.header.hop_start >= stored_mesh_packet.header.hop_limit {
-                    Some(stored_mesh_packet.header.hop_start - stored_mesh_packet.header.hop_limit)
-                } else {
-                    None
-                };
-
-            let gateway_info = GatewayInfo {
-                timestamp: stored_mesh_packet.store_timestamp,
-                rx_info,
-                hop_limit: stored_mesh_packet.header.hop_limit,
-                hop_distance,
-            };
+            let gateway_info = stored_mesh_packet.into();
 
             let list = self
                 .gateway_for
@@ -645,9 +649,11 @@ impl NodeInfo {
         };
 
         if let Some(gateway) = stored_mesh_packet.gateway {
-            if gateway == stored_mesh_packet.header.from {
-                // RSSI and SNR is always 0 for node's messages if it gateway for himself
-                return;
+            if gateway != stored_mesh_packet.header.from {
+                self.gatewayed_by
+                    .entry(gateway)
+                    .and_modify(|v| *v = stored_mesh_packet.into())
+                    .or_insert_with(|| stored_mesh_packet.into());
             }
         }
 

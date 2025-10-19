@@ -144,32 +144,35 @@ impl<'a> MapPointsPlugin<'a> {
         node_id: NodeId,
         projector: &walkers::Projector,
         current_datetime: DateTime<Utc>,
-    ) {
+    ) -> Vec<NodeId> {
+        let mut not_on_map_nodes = Vec::new();
         for (gateway_info, other_position) in self
             .nodes
             .values()
             .map(|node_info| {
-                node_info
-                    .gateway_for
-                    .get(&node_id)
-                    .map(|gateway_info| {
-                        fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
-                            .map(|position| (gateway_info.last(), position))
-                    })
-                    .flatten()
+                node_info.gateway_for.get(&node_id).map(|gateway_info| {
+                    fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
+                        .map(|position| (gateway_info.last(), Some(position)))
+                        .unwrap_or_else(|| (gateway_info.last(), None))
+                })
             })
             .filter(|v| v.is_some())
             .flatten()
         {
-            draw_connection(
-                ui,
-                onscreen_position,
-                projector.project(other_position).to_pos2(),
-                current_datetime,
-                gateway_info,
-                self.color_generator.next_color(),
-            );
+            if let Some(other_position) = other_position {
+                draw_connection(
+                    ui,
+                    onscreen_position,
+                    projector.project(other_position).to_pos2(),
+                    current_datetime,
+                    gateway_info,
+                    self.color_generator.next_color(),
+                );
+            } else {
+                not_on_map_nodes.push(node_id);
+            }
         }
+        Vec::new()
     }
 
     fn draw_received_connections(
@@ -378,8 +381,7 @@ impl<'a> MapPointsPlugin<'a> {
                 node_info.node_id,
                 projector,
                 current_datetime,
-            );
-            Vec::new()
+            )
         };
 
         self.draw_other_nodes(
@@ -436,7 +438,11 @@ impl<'a> MapPointsPlugin<'a> {
                 format!("Heared nodes: {}\n{}", node_info.gateway_for.len(), label)
             }
         } else {
-            label
+            if !not_landed_nodes.is_empty() {
+                format!("Nowhere gateways: {}\n{}", not_landed_nodes.len(), label)
+            } else {
+                label
+            }
         };
         let symbol_background = Color32::RED.gamma_multiply(0.6);
         let symbol = if is_gateway {
