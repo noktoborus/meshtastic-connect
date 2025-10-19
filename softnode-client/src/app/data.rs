@@ -350,6 +350,7 @@ pub struct GatewayInfo {
     pub rx_info: Option<StoreMeshRxInfo>,
     pub hop_limit: u32,
     pub hop_distance: Option<u32>,
+    pub via_mqtt: bool,
 }
 
 impl From<&StoredMeshPacket> for GatewayInfo {
@@ -378,6 +379,7 @@ impl From<&StoredMeshPacket> for GatewayInfo {
             rx_info,
             hop_limit: stored_mesh_packet.header.hop_limit,
             hop_distance,
+            via_mqtt: stored_mesh_packet.header.via_mqtt,
         }
     }
 }

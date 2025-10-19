@@ -263,6 +263,16 @@ impl<'a> MapPointsPlugin<'a> {
                         (String::new(), "👤".to_string())
                     };
 
+                    let label = if gateway_info.via_mqtt {
+                        if label.is_empty() {
+                            "via MQTT".to_string()
+                        } else {
+                            format!("{} via MQTT", label)
+                        }
+                    } else {
+                        label
+                    };
+
                     let label = gateway_info
                         .rx_info
                         .as_ref()
