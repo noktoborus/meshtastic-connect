@@ -702,7 +702,7 @@ fn width_by_rssi(rssi: i32) -> f32 {
 }
 
 fn opaque_by_timedelta(current_datetime: DateTime<Utc>, remote_datetime: DateTime<Utc>) -> f32 {
-    const RANGE: [f32; 2] = [0.2, 1.0];
+    const RANGE: [f32; 2] = [0.0, 1.0];
     const TIME_HOURS_LIMIT: i64 = 24;
 
     if current_datetime > remote_datetime {
@@ -714,7 +714,7 @@ fn opaque_by_timedelta(current_datetime: DateTime<Utc>, remote_datetime: DateTim
         } else if hours_diff > TIME_HOURS_LIMIT {
             RANGE[0]
         } else {
-            (hours_diff as f32 / TIME_HOURS_LIMIT as f32).max(RANGE[0])
+            RANGE[1] - (hours_diff as f32 / TIME_HOURS_LIMIT as f32)
         }
     } else {
         RANGE[1]
