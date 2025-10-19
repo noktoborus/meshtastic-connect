@@ -397,14 +397,32 @@ impl<'a> MapPointsPlugin<'a> {
             node_info.node_id.to_string()
         };
 
-        // let label = node_info
-        //     .packet_statistics
-        //     .last()
-        //     .map(|v| {
-        //         format_timediff(v.timestamp, current_datetime).map(|v| format!("{}\n{}", v, label))
-        //     })
-        //     .flatten()
-        //     .unwrap_or(label);
+        let label = if display_gatewayed_connections {
+            let timestamp = node_info
+                .gateway_for
+                .values()
+                .map(|gateway_info| gateway_info.last().map(|v| v.timestamp))
+                .flatten()
+                .max();
+
+            timestamp
+                .map(|timestamp| {
+                    format_timediff(timestamp, current_datetime)
+                        .map(|timediff_label| format!("{}\n{}", timediff_label, label))
+                })
+                .flatten()
+                .unwrap_or(label)
+        } else {
+            node_info
+                .packet_statistics
+                .last()
+                .map(|v| {
+                    format_timediff(v.timestamp, current_datetime)
+                        .map(|v| format!("{}\n{}", v, label))
+                })
+                .flatten()
+                .unwrap_or(label)
+        };
 
         let label = if display_gatewayed_connections {
             if !not_landed_nodes.is_empty() {
