@@ -12,6 +12,12 @@ pub struct FixGnss {
     pub longitude: f64,
 }
 
+// FixGnssLibrary is stored separately from the map
+// because it is simple way to load persistent data
+// between app's updates
+// e.g. map or other non-important data can change
+// and changes should not affect the FixGnssLibrary
+// like Keyring
 #[derive(Debug, Clone, Default)]
 pub struct FixGnssLibrary(HashMap<NodeId, FixGnss>);
 

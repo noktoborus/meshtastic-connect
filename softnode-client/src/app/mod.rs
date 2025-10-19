@@ -7,6 +7,7 @@ mod telemetry;
 use std::{collections::HashMap, f32, ops::ControlFlow, sync::Arc};
 pub mod color_generator;
 pub mod fix_gnss;
+mod roster;
 
 use chrono::{DateTime, Utc};
 use data::{JournalData, NodeInfo, NodeTelemetry, StoredMeshPacket, TelemetryVariant};
@@ -18,7 +19,8 @@ use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;
 
-use crate::app::map::MapContext;
+use crate::app::map::{MapContext, MapRosterPlugin};
+use crate::app::roster::RosterPlugin;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 enum Panel {
@@ -403,18 +405,20 @@ struct Roster {
     filter: String,
 }
 
+#[derive(Default)]
 enum PanelCommand {
+    #[default]
     Nothing,
     // HideRoster,
     NextPanel(Panel),
 }
 
 impl Roster {
-    fn ui(
+    fn ui<'a>(
         &mut self,
         ui: &mut egui::Ui,
+        roster_plugin: &mut MapRosterPlugin<'a>,
         mut nodes: Vec<&NodeInfo>,
-        mut add_node_ui: impl FnMut(&mut egui::Ui, &NodeInfo) -> PanelCommand,
         node_selected: Option<NodeId>,
         filter_by: ListPanelFilter,
     ) -> Option<Panel> {
@@ -434,6 +438,8 @@ impl Roster {
                 }
             })
         });
+        roster_plugin.panel_header_ui(ui);
+
         egui::ScrollArea::vertical().show(ui, |ui| {
             nodes.sort_by_key(|node_info| node_info.node_id);
             for node_info in nodes {
@@ -539,7 +545,7 @@ impl Roster {
                         }
                     }
                 });
-                match add_node_ui(ui, node_info) {
+                match roster_plugin.panel_node_ui(ui, node_info) {
                     PanelCommand::Nothing => {}
                     // PanelCommand::HideRoster => {
                     //     self.show = false;
@@ -931,53 +937,46 @@ impl eframe::App for SoftNodeApp {
         };
 
         let list_panel = &mut self.persistent.list_panel;
-        if ctx.content_rect().width() > 400.0 {
-            if list_panel.show {
-                let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
-                egui::SidePanel::left("Roster").show(ctx, |ui| {
-                    if let Some(next_panel) = list_panel.ui(
-                        ui,
-                        nodes_list,
-                        |ui, node_info| {
-                            self.persistent.map.panel_node_ui(
-                                ui,
-                                node_info,
-                                &mut self.map_context,
-                                &mut self.fix_gnss,
-                            )
-                        },
-                        None,
-                        panel_filter,
-                    ) {
-                        self.persistent.active_panel = next_panel;
-                    }
-                });
-            }
-            self.update_central_panel(ctx);
-        } else {
-            if list_panel.show {
-                let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    if let Some(next_panel) = list_panel.ui(
-                        ui,
-                        nodes_list,
-                        |ui, node_info| {
-                            self.persistent.map.panel_node_ui(
-                                ui,
-                                node_info,
-                                &mut self.map_context,
-                                &mut self.fix_gnss,
-                            )
-                        },
-                        None,
-                        panel_filter,
-                    ) {
-                        self.persistent.active_panel = next_panel;
-                    }
-                });
-            } else {
-                self.update_central_panel(ctx);
-            }
+
+        // if ctx.content_rect().width() > 400.0 {
+
+        if list_panel.show {
+            let mut roster_plugin =
+                MapRosterPlugin::new(&mut self.persistent.map, &mut self.fix_gnss);
+            let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
+            egui::SidePanel::left("Roster").show(ctx, |ui| {
+                if let Some(next_panel) =
+                    list_panel.ui(ui, &mut roster_plugin, nodes_list, None, panel_filter)
+                {
+                    self.persistent.active_panel = next_panel;
+                }
+            });
         }
+        self.update_central_panel(ctx);
+        // } else {
+        //     if list_panel.show {
+        //         let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
+        //         egui::CentralPanel::default().show(ctx, |ui| {
+        //             if let Some(next_panel) = list_panel.ui(
+        //                 ui,
+        //                 nodes_list,
+        //                 |ui, node_info| {
+        //                     self.persistent.map.panel_node_ui(
+        //                         ui,
+        //                         node_info,
+        //                         &mut self.map_context,
+        //                         &mut self.fix_gnss,
+        //                     )
+        //                 },
+        //                 None,
+        //                 panel_filter,
+        //             ) {
+        //                 self.persistent.active_panel = next_panel;
+        //             }
+        //         });
+        //     } else {
+        //         self.update_central_panel(ctx);
+        //     }
+        // }
     }
 }

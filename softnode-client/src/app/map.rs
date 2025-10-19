@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use chrono::{DateTime, Utc};
 use egui::{Button, Color32, Context, Pos2, Rect, Vec2};
@@ -14,6 +14,7 @@ use crate::app::{
     Panel, PanelCommand, color_generator,
     data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
     fix_gnss::{FixGnss, FixGnssLibrary},
+    roster::RosterPlugin,
 };
 
 pub struct MapContext {
@@ -36,6 +37,7 @@ enum MemorySelection {
 
 #[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct Memory {
+    gateway_connections: GatewayConnections,
     selection: Option<MemorySelection>,
 }
 
@@ -322,6 +324,8 @@ impl<'a> MapPointsPlugin<'a> {
         clicked_pos: Option<Pos2>,
     ) {
         let is_gateway = !node_info.gateway_for.is_empty();
+        let display_gatewayed_connections =
+            is_gateway && self.memory.gateway_connections == GatewayConnections::AsGateway;
         let current_datetime = chrono::Utc::now();
         let mesh_position = fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position);
         let position =
@@ -359,7 +363,7 @@ impl<'a> MapPointsPlugin<'a> {
             };
         }
 
-        let not_landed_nodes = if is_gateway {
+        let not_landed_nodes = if display_gatewayed_connections {
             self.draw_received_connections(
                 ui,
                 onscreen_position,
@@ -382,7 +386,7 @@ impl<'a> MapPointsPlugin<'a> {
             ui,
             projector,
             node_info,
-            is_gateway,
+            display_gatewayed_connections,
             clicked_pos,
             current_datetime,
         );
@@ -402,7 +406,7 @@ impl<'a> MapPointsPlugin<'a> {
         //     .flatten()
         //     .unwrap_or(label);
 
-        let label = if is_gateway {
+        let label = if display_gatewayed_connections {
             if !not_landed_nodes.is_empty() {
                 format!(
                     "Heared nodes: {}\nNowhere nodes: {}\n{}",
@@ -553,28 +557,78 @@ impl MapPanel {
 
         ui.add(map);
     }
+}
 
-    pub fn panel_node_ui<'a>(
-        &mut self,
-        ui: &mut egui::Ui,
-        node_info: &NodeInfo,
-        _map_context: &mut MapContext,
-        fix_gnss: &mut FixGnssLibrary,
-    ) -> PanelCommand {
-        if let Some(position) = fix_or_position(fix_gnss, node_info.node_id, &node_info.position) {
-            if fix_gnss.get(&node_info.node_id).is_some() {
+pub struct MapRosterPlugin<'a> {
+    map: &'a mut MapPanel,
+    fix_gnss: &'a mut FixGnssLibrary,
+}
+
+impl<'a> MapRosterPlugin<'a> {
+    pub fn new(map: &'a mut MapPanel, fix_gnss: &'a mut FixGnssLibrary) -> Self {
+        Self { map, fix_gnss }
+    }
+}
+
+// Gateway connections display mode
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize, PartialEq)]
+enum GatewayConnections {
+    // Display which nodes are heard by the this node
+    #[default]
+    AsGateway,
+    // Display anothers gateways, heard this node
+    AsRadio,
+}
+
+impl Display for GatewayConnections {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GatewayConnections::AsGateway => write!(f, "As gateway"),
+            GatewayConnections::AsRadio => write!(f, "As radio"),
+        }
+    }
+}
+
+impl<'a> RosterPlugin for MapRosterPlugin<'a> {
+    fn panel_header_ui(self: &mut Self, ui: &mut egui::Ui) -> PanelCommand {
+        ui.collapsing("Map settings", |ui| {
+            ui.label("Display gateway connections");
+            egui::ComboBox::from_label("")
+                .selected_text(self.map.memory.gateway_connections.to_string())
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.map.memory.gateway_connections,
+                        GatewayConnections::AsGateway,
+                        GatewayConnections::AsGateway.to_string(),
+                    );
+                    ui.selectable_value(
+                        &mut self.map.memory.gateway_connections,
+                        GatewayConnections::AsRadio,
+                        GatewayConnections::AsRadio.to_string(),
+                    );
+                });
+        });
+
+        PanelCommand::Nothing
+    }
+
+    fn panel_node_ui(self: &mut Self, ui: &mut egui::Ui, node_info: &NodeInfo) -> PanelCommand {
+        if let Some(position) =
+            fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
+        {
+            if self.fix_gnss.get(&node_info.node_id).is_some() {
                 if ui.button("Move").clicked() {
-                    fix_gnss.remove(&node_info.node_id);
+                    self.fix_gnss.remove(&node_info.node_id);
                 }
             }
             if ui.button("Show map").clicked() {
-                self.memory.selection = Some(MemorySelection::Node(node_info.node_id));
-                self.map_memory.center_at(position);
+                self.map.memory.selection = Some(MemorySelection::Node(node_info.node_id));
+                self.map.map_memory.center_at(position);
                 return PanelCommand::NextPanel(Panel::Map);
             }
         } else {
             if ui.button("Set position").clicked() {
-                self.memory.selection = Some(MemorySelection::Node(node_info.node_id));
+                self.map.memory.selection = Some(MemorySelection::Node(node_info.node_id));
                 return PanelCommand::NextPanel(Panel::Map);
             }
         }
