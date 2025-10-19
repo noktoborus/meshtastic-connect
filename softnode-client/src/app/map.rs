@@ -152,9 +152,10 @@ impl<'a> MapPointsPlugin<'a> {
             .values()
             .map(|node_info| {
                 node_info.gateway_for.get(&node_id).map(|gateway_info| {
-                    fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
-                        .map(|position| (gateway_info.last(), Some(position)))
-                        .unwrap_or_else(|| (gateway_info.last(), None))
+                    (
+                        gateway_info.last(),
+                        fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position),
+                    )
                 })
             })
             .filter(|v| v.is_some())
@@ -173,7 +174,7 @@ impl<'a> MapPointsPlugin<'a> {
                 not_on_map_nodes.push(node_id);
             }
         }
-        Vec::new()
+        not_on_map_nodes
     }
 
     fn draw_received_connections(
