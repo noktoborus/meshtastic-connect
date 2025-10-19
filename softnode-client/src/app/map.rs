@@ -445,10 +445,12 @@ impl<'a> MapPointsPlugin<'a> {
     fn draw_regular(
         self: &mut Box<Self>,
         ui: &mut egui::Ui,
+        zoom: f64,
         projector: &walkers::Projector,
         clicked_pos: Option<Pos2>,
     ) {
         for (node_id, node_info) in self.nodes {
+            let is_gateway = !node_info.gateway_for.is_empty();
             let mesh_position = fix_or_position(&self.fix_gnss, *node_id, &node_info.position);
             if let Some(position) = mesh_position {
                 let symbol_size = circle_radius(node_info.gateway_for.len());
@@ -463,22 +465,33 @@ impl<'a> MapPointsPlugin<'a> {
                     }
                 }
 
-                let label = if let Some(extended_info) = node_info.extended_info_history.last() {
-                    format!("{}\n{}", extended_info.short_name, node_info.node_id)
+                let label = if is_gateway && zoom > 5.0 || zoom > 10.0 {
+                    if let Some(extended_info) = node_info.extended_info_history.last() {
+                        format!("{}\n{}", extended_info.short_name, node_info.node_id)
+                    } else {
+                        node_info.node_id.to_string()
+                    }
                 } else {
-                    node_info.node_id.to_string()
+                    String::new()
                 };
+
+                let label = if zoom > 12.0 {
+                    let telemetry_label = get_telemetry_label(&node_info);
+                    let label = if telemetry_label.is_empty() {
+                        label
+                    } else {
+                        format!("{}\n{}", telemetry_label, label)
+                    };
+                    label
+                } else {
+                    label
+                };
+
                 let symbol_background = Color32::WHITE.gamma_multiply(0.6);
                 let symbol = if node_info.gateway_for.is_empty() {
                     Some(Symbol::TwoCorners("👤".into()))
                 } else {
                     Some(Symbol::Circle("👤".into()))
-                };
-                let telemetry_label = get_telemetry_label(&node_info);
-                let label = if telemetry_label.is_empty() {
-                    label
-                } else {
-                    format!("{}\n{}", telemetry_label, label)
                 };
 
                 LabeledSymbol {
@@ -504,7 +517,7 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
         ui: &mut egui::Ui,
         response: &egui::Response,
         projector: &walkers::Projector,
-        _map_memory: &MapMemory,
+        map_memory: &MapMemory,
     ) {
         let clicked_pos = response.clicked().then(|| response.hover_pos()).flatten();
         if clicked_pos.is_some() {
@@ -534,7 +547,7 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
         if let Some(selection) = selection {
             self.draw_selected(ui, response, projector, selection, clicked_pos);
         } else {
-            self.draw_regular(ui, projector, clicked_pos);
+            self.draw_regular(ui, map_memory.zoom(), projector, clicked_pos);
         }
     }
 }
