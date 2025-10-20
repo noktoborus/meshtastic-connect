@@ -40,6 +40,8 @@ enum MemorySelection {
 pub struct Memory {
     gateway_connections: GatewayConnections,
     selection: Option<MemorySelection>,
+    display_assumed_positions: bool,
+    hide_labels: bool,
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
@@ -147,13 +149,14 @@ impl<'a> MapPointsPlugin<'a> {
         current_datetime: DateTime<Utc>,
     ) -> Vec<NodeId> {
         let mut not_on_map_nodes = Vec::new();
-        for (gateway_info, other_position) in self
+        for (gateway_info, gateway_node_info, other_mesh_position) in self
             .nodes
             .values()
             .map(|node_info| {
                 node_info.gateway_for.get(&node_id).map(|gateway_info| {
                     (
                         gateway_info.last(),
+                        node_info,
                         fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position),
                     )
                 })
@@ -161,7 +164,13 @@ impl<'a> MapPointsPlugin<'a> {
             .filter(|v| v.is_some())
             .flatten()
         {
-            if let Some(other_position) = other_position {
+            let assumed_position = if self.memory.display_assumed_positions {
+                gateway_node_info.assumed_position
+            } else {
+                None
+            };
+
+            if let Some(other_position) = other_mesh_position.or(assumed_position) {
                 draw_connection(
                     ui,
                     onscreen_position,
@@ -188,57 +197,57 @@ impl<'a> MapPointsPlugin<'a> {
         let mut not_on_map_nodes = Vec::new();
         for (node_id, gateway_info) in gateway_node_info.gateway_for.iter() {
             let connection_color = self.color_generator.next_color();
-            if let Some(other_position) = self
-                .nodes
-                .get(node_id)
-                .map(|node_info| {
-                    fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
-                })
-                .flatten()
-            {
-                draw_connection(
-                    ui,
-                    gateway_onscreen_position,
-                    projector.project(other_position).to_pos2(),
-                    current_datetime,
-                    gateway_info.last(),
-                    connection_color,
-                );
-            } else {
-                not_on_map_nodes.push(*node_id);
+            if let Some(node_info) = self.nodes.get(node_id) {
+                let other_mesh_position =
+                    fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position);
+
+                let assumed_position = if self.memory.display_assumed_positions {
+                    node_info.assumed_position
+                } else {
+                    None
+                };
+
+                if let Some(other_position) = other_mesh_position.or(assumed_position) {
+                    draw_connection(
+                        ui,
+                        gateway_onscreen_position,
+                        projector.project(other_position).to_pos2(),
+                        current_datetime,
+                        gateway_info.last(),
+                        connection_color,
+                    );
+                } else {
+                    not_on_map_nodes.push(*node_id);
+                }
             }
         }
         not_on_map_nodes
     }
 
     fn draw_other_nodes(
-        self: Box<Self>,
+        self: &Box<Self>,
         ui: &mut egui::Ui,
         projector: &walkers::Projector,
         selected_node_position: Option<walkers::Position>,
         selected_node_info: &'a NodeInfo,
         selected_is_gateway: bool,
-        clicked_pos: Option<Pos2>,
         current_datetime: DateTime<Utc>,
     ) {
         for (other_node_id, other_node_info) in self.nodes {
             if *other_node_id == selected_node_info.node_id {
                 continue;
             }
-            if let Some(position) =
-                fix_or_position(&self.fix_gnss, *other_node_id, &other_node_info.position)
-            {
+
+            let mesh_position =
+                fix_or_position(&self.fix_gnss, *other_node_id, &other_node_info.position);
+            let assumed_position = if self.memory.display_assumed_positions {
+                other_node_info.assumed_position
+            } else {
+                None
+            };
+
+            if let Some(position) = mesh_position.or(assumed_position) {
                 let symbol_size = circle_radius(other_node_info.gateway_for.len());
-                let onscreen_position = projector.project(position).to_pos2();
-                if let Some(clicked_pos) = clicked_pos {
-                    if clicked_pos.distance(onscreen_position)
-                        < symbol_size * Self::SYMBOL_SIZE_SELECT_FACTOR
-                    {
-                        self.memory.selection = Some(MemorySelection::Node(*other_node_id));
-                        ui.ctx().request_repaint();
-                        return;
-                    }
-                }
                 let possible_gateway_info = if selected_is_gateway {
                     selected_node_info
                         .gateway_for
@@ -256,7 +265,9 @@ impl<'a> MapPointsPlugin<'a> {
                         })
                         .flatten()
                 };
-                let (symbol_label, label) = if let Some(gateway_info) = possible_gateway_info {
+                let (symbol_label, label) = if !self.memory.hide_labels
+                    && let Some(gateway_info) = possible_gateway_info
+                {
                     let (label, symbol) = if let Some(distance) = gateway_info.hop_distance {
                         (format!("Hops away: {}", distance), distance.to_string())
                     } else {
@@ -288,12 +299,17 @@ impl<'a> MapPointsPlugin<'a> {
                         .map(|v| format!("{}\n{}", label, v))
                         .unwrap_or(label);
 
-                    let label = if let Some(mesh_position) = selected_node_position {
-                        let distance = Haversine.distance(mesh_position, position);
-                        if distance > 1000.0 {
-                            format!("{}\nDistance: {:.3} km", label, distance / 1000.0)
+                    let label = if let Some(some_mesh_position) = selected_node_position {
+                        let title = if mesh_position.is_none() {
+                            "Distance?"
                         } else {
-                            format!("{}\nDistance: {:.2} m", label, distance)
+                            "Distance"
+                        };
+                        let distance = Haversine.distance(some_mesh_position, position);
+                        if distance > 1000.0 {
+                            format!("{}\n{}: {:.3} km", label, title, distance / 1000.0)
+                        } else {
+                            format!("{}\n{}: {:.2} m", label, title, distance)
                         }
                     } else {
                         label
@@ -308,14 +324,18 @@ impl<'a> MapPointsPlugin<'a> {
                                 label, extended_info.short_name, other_node_info.node_id
                             )
                         })
-                        .unwrap_or(label);
+                        .unwrap_or(format!("{}\n{}", label, other_node_info.node_id));
 
                     (symbol, label)
                 } else {
                     ("👤".to_string(), "".to_string())
                 };
 
-                let symbol_background = Color32::WHITE.gamma_multiply(0.6);
+                let symbol_background = if mesh_position.is_none() {
+                    Color32::LIGHT_BLUE.gamma_multiply(0.6)
+                } else {
+                    Color32::WHITE.gamma_multiply(0.6)
+                };
                 let symbol = if other_node_info.gateway_for.is_empty() {
                     Some(Symbol::TwoCorners(symbol_label))
                 } else {
@@ -355,8 +375,15 @@ impl<'a> MapPointsPlugin<'a> {
             is_gateway && self.memory.gateway_connections == GatewayConnections::AsGateway;
         let current_datetime = chrono::Utc::now();
         let mesh_position = fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position);
-        let position =
-            mesh_position.unwrap_or(projector.unproject(response.rect.center().to_vec2()));
+        let assumed_position = self
+            .memory
+            .display_assumed_positions
+            .then(|| node_info.assumed_position)
+            .flatten();
+        let position = mesh_position.unwrap_or(
+            assumed_position
+                .unwrap_or_else(|| projector.unproject(response.rect.center().to_vec2())),
+        );
         let symbol_size = circle_radius(node_info.gateway_for.len());
         let onscreen_position = projector.project(position).to_pos2();
         if let Some(clicked_pos) = clicked_pos {
@@ -365,29 +392,6 @@ impl<'a> MapPointsPlugin<'a> {
             {
                 self.memory.selection = Some(MemorySelection::Node(node_info.node_id));
             }
-        }
-
-        if mesh_position.is_none() {
-            let buttons_position = Pos2::new(onscreen_position.x, onscreen_position.y - 20.0);
-            if ui
-                .put(
-                    Rect::from_center_size(buttons_position, Vec2::new(140., 20.)),
-                    Button::new("Put here"),
-                )
-                .clicked()
-            {
-                self.fix_gnss
-                    .entry(node_info.node_id)
-                    .and_modify(|v| {
-                        v.longitude = position.x();
-                        v.latitude = position.y();
-                    })
-                    .or_insert(FixGnss {
-                        node_id: node_info.node_id,
-                        longitude: position.x(),
-                        latitude: position.y(),
-                    });
-            };
         }
 
         let not_landed_nodes = if display_gatewayed_connections {
@@ -414,60 +418,64 @@ impl<'a> MapPointsPlugin<'a> {
             mesh_position,
             node_info,
             display_gatewayed_connections,
-            clicked_pos,
             current_datetime,
         );
 
-        let label = if let Some(extended_info) = node_info.extended_info_history.last() {
-            format!("{}\n{}", extended_info.short_name, node_info.node_id)
+        let label = if self.memory.hide_labels {
+            String::new()
         } else {
-            node_info.node_id.to_string()
-        };
+            let label = if let Some(extended_info) = node_info.extended_info_history.last() {
+                format!("{}\n{}", extended_info.short_name, node_info.node_id)
+            } else {
+                node_info.node_id.to_string()
+            };
 
-        let label = if display_gatewayed_connections {
-            let timestamp = node_info
-                .gateway_for
-                .values()
-                .map(|gateway_info| gateway_info.last().map(|v| v.timestamp))
-                .flatten()
-                .max();
+            let label = if display_gatewayed_connections {
+                let timestamp = node_info
+                    .gateway_for
+                    .values()
+                    .map(|gateway_info| gateway_info.last().map(|v| v.timestamp))
+                    .flatten()
+                    .max();
 
-            timestamp
-                .map(|timestamp| {
-                    format_timediff(timestamp, current_datetime)
-                        .map(|timediff_label| format!("{}\n{}", timediff_label, label))
-                })
-                .flatten()
-                .unwrap_or(label)
-        } else {
-            node_info
-                .packet_statistics
-                .last()
-                .map(|v| {
-                    format_timediff(v.timestamp, current_datetime)
-                        .map(|v| format!("{}\n{}", v, label))
-                })
-                .flatten()
-                .unwrap_or(label)
-        };
+                timestamp
+                    .map(|timestamp| {
+                        format_timediff(timestamp, current_datetime)
+                            .map(|timediff_label| format!("{}\n{}", timediff_label, label))
+                    })
+                    .flatten()
+                    .unwrap_or(label)
+            } else {
+                node_info
+                    .packet_statistics
+                    .last()
+                    .map(|v| {
+                        format_timediff(v.timestamp, current_datetime)
+                            .map(|v| format!("{}\n{}", v, label))
+                    })
+                    .flatten()
+                    .unwrap_or(label)
+            };
 
-        let label = if display_gatewayed_connections {
-            if !not_landed_nodes.is_empty() {
-                format!(
-                    "Heared nodes: {}\nNowhere nodes: {}\n{}",
-                    node_info.gateway_for.len(),
-                    not_landed_nodes.len(),
+            let label = if display_gatewayed_connections {
+                if !not_landed_nodes.is_empty() {
+                    format!(
+                        "Heared nodes: {}\nNowhere nodes: {}\n{}",
+                        node_info.gateway_for.len(),
+                        not_landed_nodes.len(),
+                        label
+                    )
+                } else {
+                    format!("Heared nodes: {}\n{}", node_info.gateway_for.len(), label)
+                }
+            } else {
+                if !not_landed_nodes.is_empty() {
+                    format!("Nowhere gateways: {}\n{}", not_landed_nodes.len(), label)
+                } else {
                     label
-                )
-            } else {
-                format!("Heared nodes: {}\n{}", node_info.gateway_for.len(), label)
-            }
-        } else {
-            if !not_landed_nodes.is_empty() {
-                format!("Nowhere gateways: {}\n{}", not_landed_nodes.len(), label)
-            } else {
-                label
-            }
+                }
+            };
+            label
         };
         let symbol_background = Color32::RED.gamma_multiply(0.6);
         let symbol = if is_gateway {
@@ -475,6 +483,28 @@ impl<'a> MapPointsPlugin<'a> {
         } else {
             Some(Symbol::TwoCorners("👤".into()))
         };
+
+        if mesh_position.is_none() {
+            let buttons_position = Pos2::new(onscreen_position.x, onscreen_position.y - 20.0);
+            if ui
+                .put(
+                    Rect::from_center_size(buttons_position, Vec2::new(140., 20.)),
+                    Button::new("Put here"),
+                )
+                .clicked()
+            {
+                self.fix_gnss
+                    .entry(node_info.node_id)
+                    .and_modify(|v| {
+                        v.longitude = position.x();
+                        v.latitude = position.y();
+                    })
+                    .or_insert(FixGnss {
+                        longitude: position.x(),
+                        latitude: position.y(),
+                    });
+            };
+        }
 
         LabeledSymbol {
             position,
@@ -501,7 +531,13 @@ impl<'a> MapPointsPlugin<'a> {
         for (node_id, node_info) in self.nodes {
             let is_gateway = !node_info.gateway_for.is_empty();
             let mesh_position = fix_or_position(&self.fix_gnss, *node_id, &node_info.position);
-            if let Some(position) = mesh_position {
+            let assumed_position = if self.memory.display_assumed_positions {
+                node_info.assumed_position
+            } else {
+                None
+            };
+
+            if let Some(position) = mesh_position.or(assumed_position) {
                 let symbol_size = circle_radius(node_info.gateway_for.len());
                 let onscreen_position = projector.project(position).to_pos2();
                 if let Some(clicked_pos) = clicked_pos {
@@ -514,29 +550,38 @@ impl<'a> MapPointsPlugin<'a> {
                     }
                 }
 
-                let label = if is_gateway && zoom > 5.0 || zoom > 10.0 {
-                    if let Some(extended_info) = node_info.extended_info_history.last() {
-                        format!("{}\n{}", extended_info.short_name, node_info.node_id)
-                    } else {
-                        node_info.node_id.to_string()
-                    }
-                } else {
+                let label = if self.memory.hide_labels {
                     String::new()
-                };
+                } else {
+                    let label = if is_gateway && zoom > 5.0 || zoom > 10.0 {
+                        if let Some(extended_info) = node_info.extended_info_history.last() {
+                            format!("{}\n{}", extended_info.short_name, node_info.node_id)
+                        } else {
+                            node_info.node_id.to_string()
+                        }
+                    } else {
+                        String::new()
+                    };
 
-                let label = if zoom > 12.0 {
-                    let telemetry_label = get_telemetry_label(&node_info);
-                    let label = if telemetry_label.is_empty() {
+                    let label = if zoom > 12.0 {
+                        let telemetry_label = get_telemetry_label(&node_info);
+                        let label = if telemetry_label.is_empty() {
+                            label
+                        } else {
+                            format!("{}\n{}", telemetry_label, label)
+                        };
                         label
                     } else {
-                        format!("{}\n{}", telemetry_label, label)
+                        label
                     };
-                    label
-                } else {
                     label
                 };
 
-                let symbol_background = Color32::WHITE.gamma_multiply(0.6);
+                let symbol_background = if mesh_position.is_none() {
+                    Color32::LIGHT_BLUE.gamma_multiply(0.6)
+                } else {
+                    Color32::WHITE.gamma_multiply(0.6)
+                };
                 let symbol = if node_info.gateway_for.is_empty() {
                     Some(Symbol::TwoCorners("👤".into()))
                 } else {
@@ -669,7 +714,22 @@ impl<'a> RosterPlugin for MapRosterPlugin<'a> {
                         GatewayConnections::AsRadio.to_string(),
                     );
                 });
+            ui.checkbox(
+                &mut self.map.memory.display_assumed_positions,
+                "Display assumed positions",
+            );
+            ui.checkbox(&mut self.map.memory.hide_labels, "Hide node's labels")
         });
+        // ui.collapsing("GNSS Spoofing Zones", |ui| {
+        //     for (zone_name, zone) in self.fix_gnss.list_zones() {
+        //         ui.label(zone_name);
+        //         ui.label(format!(
+        //             "  center: {:.6} {:.6}",
+        //             zone.center.longitude, zone.center.latitude
+        //         ));
+        //         ui.label(format!("  radius: {} ", zone.radius));
+        //     }
+        // });
 
         PanelCommand::Nothing
     }
@@ -677,13 +737,14 @@ impl<'a> RosterPlugin for MapRosterPlugin<'a> {
     fn panel_node_ui(self: &mut Self, ui: &mut egui::Ui, node_info: &NodeInfo) -> PanelCommand {
         if let Some(position) =
             fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
+                .or(node_info.assumed_position)
         {
             if self.fix_gnss.get(&node_info.node_id).is_some() {
                 if ui.button("Move").clicked() {
                     self.fix_gnss.remove(&node_info.node_id);
                 }
             }
-            if ui.button("Show map").clicked() {
+            if ui.button("Show on map").clicked() {
                 self.map.memory.selection = Some(MemorySelection::Node(node_info.node_id));
                 self.map.map_memory.center_at(position);
                 return PanelCommand::NextPanel(Panel::Map);

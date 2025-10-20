@@ -389,6 +389,7 @@ pub struct NodeInfo {
     pub node_id: NodeId,
     pub extended_info_history: Vec<NodeInfoExtended>,
     pub position: Vec<Position>,
+    pub assumed_position: Option<walkers::Position>,
     pub telemetry: HashMap<TelemetryVariant, Vec<NodeTelemetry>>,
     pub packet_statistics: Vec<NodePacket>,
     pub gateway_for: HashMap<NodeId, Vec<GatewayInfo>>,

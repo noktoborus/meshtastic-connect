@@ -7,6 +7,7 @@ mod telemetry;
 use std::{collections::HashMap, f32, ops::ControlFlow, sync::Arc};
 pub mod color_generator;
 pub mod fix_gnss;
+pub mod radio_center;
 mod roster;
 
 use chrono::{DateTime, Utc};
@@ -20,6 +21,7 @@ use settings::Settings;
 use telemetry::Telemetry;
 
 use crate::app::map::{MapContext, MapRosterPlugin};
+use crate::app::radio_center::assume_position;
 use crate::app::roster::RosterPlugin;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -351,6 +353,7 @@ impl SoftNodeApp {
             if let Some(last_record) = data.last() {
                 self.last_sync_point = Some(last_record.sequence_number);
             }
+            let mut affected_nodes = Vec::new();
 
             for stored_mesh_packet in data.drain(..) {
                 let node_id = stored_mesh_packet.header.from;
@@ -375,6 +378,24 @@ impl SoftNodeApp {
 
                 entry.update(&stored_mesh_packet);
                 self.journal.push(stored_mesh_packet.clone().into());
+                affected_nodes.push(node_id);
+            }
+
+            for node_id in affected_nodes {
+                let assumed_position = if let Some(node_info) = self.nodes.get(&node_id) {
+                    if node_info.position.is_empty()
+                        && (!node_info.gateway_for.is_empty() || !node_info.gatewayed_by.is_empty())
+                    {
+                        assume_position(node_info, &self.nodes)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                self.nodes
+                    .entry(node_id)
+                    .and_modify(|v| v.assumed_position = assumed_position);
             }
 
             if matches!(download_state, DownloadState::Idle) {
@@ -438,9 +459,10 @@ impl Roster {
                 }
             })
         });
-        roster_plugin.panel_header_ui(ui);
 
         egui::ScrollArea::vertical().show(ui, |ui| {
+            roster_plugin.panel_header_ui(ui);
+
             nodes.sort_by_key(|node_info| node_info.node_id);
             for node_info in nodes {
                 if !self.filter.is_empty() {
