@@ -449,9 +449,7 @@ impl Roster {
             egui::TextEdit::singleline(&mut self.filter)
                 .desired_width(f32::INFINITY)
                 .hint_text("Search node by id or name")
-                .show(ui)
-                .response
-                .request_focus();
+                .show(ui);
             ui.input(|i| {
                 if i.key_pressed(egui::Key::Escape) {
                     self.show = false;
