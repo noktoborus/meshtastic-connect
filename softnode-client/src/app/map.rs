@@ -388,7 +388,7 @@ impl<'a> MapPointsPlugin<'a> {
     ) {
         let is_gateway = !node_info.gateway_for.is_empty();
         let display_gatewayed_connections =
-            is_gateway && self.memory.gateway_connections == GatewayConnections::AsGateway;
+            is_gateway && self.memory.gateway_connections == GatewayConnections::Incoming;
         let current_datetime = chrono::Utc::now();
         let mesh_position = fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position);
         let assumed_position = self
@@ -773,16 +773,16 @@ impl<'a> MapRosterPlugin<'a> {
 enum GatewayConnections {
     // Display which nodes are heard by the this node
     #[default]
-    AsGateway,
+    Incoming,
     // Display anothers gateways, heard this node
-    AsRadio,
+    Outgoing,
 }
 
 impl Display for GatewayConnections {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            GatewayConnections::AsGateway => write!(f, "As gateway"),
-            GatewayConnections::AsRadio => write!(f, "As radio"),
+            GatewayConnections::Incoming => write!(f, "Incoming"),
+            GatewayConnections::Outgoing => write!(f, "Outgoing"),
         }
     }
 }
@@ -796,20 +796,20 @@ impl<'a> RosterPlugin for MapRosterPlugin<'a> {
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut self.map.memory.gateway_connections,
-                        GatewayConnections::AsGateway,
-                        GatewayConnections::AsGateway.to_string(),
+                        GatewayConnections::Incoming,
+                        GatewayConnections::Incoming.to_string(),
                     );
                     ui.selectable_value(
                         &mut self.map.memory.gateway_connections,
-                        GatewayConnections::AsRadio,
-                        GatewayConnections::AsRadio.to_string(),
+                        GatewayConnections::Outgoing,
+                        GatewayConnections::Outgoing.to_string(),
                     );
                 });
             ui.checkbox(
                 &mut self.map.memory.display_assumed_positions,
                 "Display assumed positions",
             );
-            ui.checkbox(&mut self.map.memory.hide_labels, "Hide node's labels")
+            ui.checkbox(&mut self.map.memory.hide_labels, "Hide node's labels");
         });
         ui.collapsing("GNSS Spoofing Zones", |ui| {
             if let Some(MemorySelection::NewZone(zone)) = self.map.memory.selection {
