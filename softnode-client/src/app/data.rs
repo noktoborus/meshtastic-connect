@@ -6,6 +6,8 @@ use meshtastic_connect::{
 use prost::Message;
 use std::{collections::HashMap, fmt::Display};
 
+use crate::app::fix_gnss::{FixGnss, FixGnssLibrary};
+
 use super::byte_node_id::ByteNodeId;
 
 pub struct JournalData {
@@ -435,6 +437,7 @@ impl NodeInfo {
         &mut self,
         stored_timestamp: DateTime<Utc>,
         data: &meshtastic::Data,
+        fix_gnss: &FixGnssLibrary,
     ) -> Result<meshtastic::PortNum, String> {
         match data.portnum() {
             meshtastic::PortNum::PositionApp => {
@@ -451,20 +454,31 @@ impl NodeInfo {
                     0
                 };
 
-                let position = Position {
-                    seq_number: mesh_position.seq_number,
-                    timestamp: DateTime::from_timestamp(mesh_position.timestamp as i64, 0)
-                        .unwrap_or(Default::default()),
-                    latitude: mesh_position.latitude_i() as f64 * 1e-7,
-                    longitude: mesh_position.longitude_i() as f64 * 1e-7,
-                    altitude,
-                    speed: mesh_position.ground_speed(),
+                let latitude = mesh_position.latitude_i() as f64 * 1e-7;
+                let longitude = mesh_position.longitude_i() as f64 * 1e-7;
+                let fix_gnss_query = FixGnss {
+                    latitude,
+                    longitude,
                 };
 
-                if position.timestamp == DateTime::<Utc>::default() {
-                    self.position.push(position);
+                if let Some(zone_name) = fix_gnss.point_in_zone(&fix_gnss_query) {
+                    log::info!("Skip point in zone id: {:?}", zone_name);
                 } else {
-                    push_statistic!(self.position, position);
+                    let position = Position {
+                        seq_number: mesh_position.seq_number,
+                        timestamp: DateTime::from_timestamp(mesh_position.timestamp as i64, 0)
+                            .unwrap_or(Default::default()),
+                        latitude,
+                        longitude,
+                        altitude,
+                        speed: mesh_position.ground_speed(),
+                    };
+
+                    if position.timestamp == DateTime::<Utc>::default() {
+                        self.position.push(position);
+                    } else {
+                        push_statistic!(self.position, position);
+                    }
                 }
             }
             meshtastic::PortNum::NodeinfoApp => {
@@ -626,22 +640,24 @@ impl NodeInfo {
         }
     }
 
-    pub fn update(&mut self, stored_mesh_packet: &StoredMeshPacket) {
+    pub fn update(&mut self, stored_mesh_packet: &StoredMeshPacket, fix_gnss: &FixGnssLibrary) {
         let timestamp = stored_mesh_packet.store_timestamp;
         // TODO: move to perday_telemetry
         // self.push_telemetry(timestamp, TelemetryVariant::MeshPacket, 1);
         let packet_type = if let Some(data) = &stored_mesh_packet.data {
             match data {
                 DataVariant::Encrypted(_) => NodePacketType::CannotDecrypt,
-                DataVariant::Decrypted(_, data) => match self.update_using_data(timestamp, data) {
-                    Ok(portnum) => NodePacketType::Normal(format!("{}", portnum.as_str_name())),
-                    Err(e) => {
-                        log::error!("Failed to update using data: {}", e);
-                        NodePacketType::Error
-                        // TODO: move to perday_telemetry
-                        // self.push_telemetry(timestamp, TelemetryVariant::CorruptedPacket, 1);
+                DataVariant::Decrypted(_, data) => {
+                    match self.update_using_data(timestamp, data, fix_gnss) {
+                        Ok(portnum) => NodePacketType::Normal(format!("{}", portnum.as_str_name())),
+                        Err(e) => {
+                            log::error!("Failed to update using data: {}", e);
+                            NodePacketType::Error
+                            // TODO: move to perday_telemetry
+                            // self.push_telemetry(timestamp, TelemetryVariant::CorruptedPacket, 1);
+                        }
                     }
-                },
+                }
 
                 DataVariant::DecryptError(_, _) => NodePacketType::Error,
             }

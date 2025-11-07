@@ -4,7 +4,10 @@ use geo::Point;
 use geo::algorithm::centroid::Centroid;
 use meshtastic_connect::keyring::node_id::NodeId;
 
-use crate::app::data::{GatewayInfo, NodeInfo};
+use crate::app::{
+    data::{GatewayInfo, NodeInfo},
+    fix_gnss::FixGnssLibrary,
+};
 
 fn rssi_to_distance(rssi: i32) -> f64 {
     let clamped = rssi.clamp(-130, 20);
@@ -55,34 +58,40 @@ pub fn compute_weighted_center(
 pub fn assume_position(
     node_info: &NodeInfo,
     nodes: &HashMap<NodeId, NodeInfo>,
+    fix_gnss: &FixGnssLibrary,
 ) -> Option<walkers::Position> {
-    let to_pos_info = |node_id,
-                       gateway_info: Option<&GatewayInfo>|
-     -> Option<(i32, walkers::Position)> {
-        if let Some(gateway_info) = gateway_info {
-            nodes
-                .get(node_id)
-                .map(|v| {
-                    gateway_info
-                        .rx_info
-                        .as_ref()
-                        .map(|rx_info| {
-                            if let Some(position) = v.position.last() {
-                                Some((
-                                    rx_info.rx_rssi,
-                                    walkers::Position::new(position.longitude, position.latitude),
-                                ))
-                            } else {
-                                None
-                            }
-                        })
-                        .flatten()
-                })
-                .flatten()
-        } else {
-            None
-        }
-    };
+    let to_pos_info =
+        |node_id, gateway_info: Option<&GatewayInfo>| -> Option<(i32, walkers::Position)> {
+            if let Some(gateway_info) = gateway_info {
+                nodes
+                    .get(node_id)
+                    .map(|v| {
+                        gateway_info
+                            .rx_info
+                            .as_ref()
+                            .map(|rx_info| {
+                                if let Some(position) = v
+                                    .position
+                                    .last()
+                                    .map(|pos| walkers::Position::new(pos.longitude, pos.latitude))
+                                    .or_else(|| {
+                                        fix_gnss.node_get(node_id).map(|fix| {
+                                            walkers::Position::new(fix.longitude, fix.latitude)
+                                        })
+                                    })
+                                {
+                                    Some((rx_info.rx_rssi, position))
+                                } else {
+                                    None
+                                }
+                            })
+                            .flatten()
+                    })
+                    .flatten()
+            } else {
+                None
+            }
+        };
 
     let mut positions = node_info
         .gatewayed_by

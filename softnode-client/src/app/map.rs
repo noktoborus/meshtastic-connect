@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display};
 
 use chrono::{DateTime, Utc};
-use egui::{Button, Color32, Context, Pos2, Rect, Vec2};
+use egui::{Align2, Button, Color32, Context, FontId, Pos2, Rect, Vec2};
 use geo::{Distance, Haversine};
 use meshtastic_connect::keyring::node_id::NodeId;
 use walkers::{
@@ -14,7 +14,7 @@ use walkers::{
 use crate::app::{
     Panel, PanelCommand, color_generator,
     data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
-    fix_gnss::{FixGnss, FixGnssLibrary},
+    fix_gnss::{FixGnss, FixGnssLibrary, IgnoreZone, ZoneId},
     roster::RosterPlugin,
 };
 
@@ -31,9 +31,25 @@ impl MapContext {
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, PartialEq, Clone, Copy)]
+struct NewZoneInfo {
+    center: FixGnss,
+    radius_meters: f32,
+}
+
+impl NewZoneInfo {
+    pub fn new(center: FixGnss, radius_meters: f32) -> Self {
+        Self {
+            center,
+            radius_meters,
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, PartialEq, Clone, Copy)]
 enum MemorySelection {
     Node(NodeId),
-    Position(walkers::Position),
+    Zone(ZoneId),
+    NewZone(NewZoneInfo),
 }
 
 #[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
@@ -78,7 +94,7 @@ fn fix_or_position(
     positions: &Vec<Position>,
 ) -> Option<walkers::Position> {
     fix_gnss
-        .get(&node_id)
+        .node_get(&node_id)
         .map(|fix| lon_lat(fix.longitude, fix.latitude))
         .or_else(|| {
             positions
@@ -494,7 +510,7 @@ impl<'a> MapPointsPlugin<'a> {
                 .clicked()
             {
                 self.fix_gnss
-                    .entry(node_info.node_id)
+                    .node(node_info.node_id)
                     .and_modify(|v| {
                         v.longitude = position.x();
                         v.latitude = position.y();
@@ -603,7 +619,80 @@ impl<'a> MapPointsPlugin<'a> {
             }
         }
     }
+
+    fn draw_zones(
+        self: &mut Box<Self>,
+        ui: &mut egui::Ui,
+        response: &egui::Response,
+        projector: &walkers::Projector,
+        clicked_pos: Option<Pos2>,
+    ) {
+        if let Some(MemorySelection::NewZone(zone)) = &mut self.memory.selection {
+            let center_coordinates = projector.unproject(response.rect.center().to_vec2());
+            let meter_scale = projector.scale_pixel_per_meter(center_coordinates);
+
+            let radius = response.rect.height().min(response.rect.width()) / 2.0 - 100.0;
+            zone.radius_meters = radius / meter_scale;
+            zone.center = center_coordinates.into();
+            let fill_color = Color32::BLACK.gamma_multiply(0.2);
+            let center = response.rect.center();
+            let stroke = egui::Stroke::new(1.0, Color32::BLACK);
+            ui.painter().circle(center, radius, fill_color, stroke);
+
+            let mut button_position = response.rect.center();
+            button_position.y -= 30.0;
+
+            if ui
+                .put(
+                    Rect::from_center_size(button_position, Vec2::new(140., 20.)),
+                    Button::new("APPLY"),
+                )
+                .clicked()
+            {
+                let ignore_zone = IgnoreZone {
+                    name: String::new(),
+                    center: center_coordinates.into(),
+                    radius_meters: radius / meter_scale,
+                };
+                self.fix_gnss.zone_add(ignore_zone);
+                self.memory.selection = None;
+            }
+
+            button_position.y += 40.0;
+
+            if ui
+                .put(
+                    Rect::from_center_size(button_position, Vec2::new(140., 20.)),
+                    Button::new("Cancel"),
+                )
+                .clicked()
+            {
+                self.memory.selection = None;
+            }
+        }
+
+        for (_, zone) in self.fix_gnss.zones_list() {
+            let position = lon_lat(zone.center.longitude, zone.center.latitude);
+            let center = projector.project(position).to_pos2();
+            let fill_color = Color32::LIGHT_GRAY.gamma_multiply(0.3);
+            let radius = zone.radius_meters as f32 * projector.scale_pixel_per_meter(position);
+            if radius >= 10.0 {
+                ui.painter().circle_filled(center, radius, fill_color);
+                if radius >= ZONE_RADIUS_THRESHOLD {
+                    ui.painter().text(
+                        center,
+                        Align2::CENTER_CENTER,
+                        zone.name.clone(),
+                        FontId::proportional(16.0),
+                        Color32::WHITE,
+                    );
+                }
+            }
+        }
+    }
 }
+
+const ZONE_RADIUS_THRESHOLD: f32 = 100.0;
 
 impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
     fn run(
@@ -637,6 +726,8 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
                 }
             })
             .flatten();
+
+        self.draw_zones(ui, response, projector, clicked_pos);
 
         if let Some(selection) = selection {
             self.draw_selected(ui, response, projector, selection, clicked_pos);
@@ -720,16 +811,59 @@ impl<'a> RosterPlugin for MapRosterPlugin<'a> {
             );
             ui.checkbox(&mut self.map.memory.hide_labels, "Hide node's labels")
         });
-        // ui.collapsing("GNSS Spoofing Zones", |ui| {
-        //     for (zone_name, zone) in self.fix_gnss.list_zones() {
-        //         ui.label(zone_name);
-        //         ui.label(format!(
-        //             "  center: {:.6} {:.6}",
-        //             zone.center.longitude, zone.center.latitude
-        //         ));
-        //         ui.label(format!("  radius: {} ", zone.radius));
-        //     }
-        // });
+        ui.collapsing("GNSS Spoofing Zones", |ui| {
+            if let Some(MemorySelection::NewZone(zone)) = self.map.memory.selection {
+                let label =
+                    egui::RichText::new(format!(
+                        "{:.6} {:.6} {:.2} m",
+                        zone.center.longitude,  zone.center.latitude, zone.radius_meters));
+                ui.label(label);
+
+                if ui.button("CANCEL").clicked() {
+                    self.map.memory.selection = None;
+                }
+            } else {
+                if ui.button("ADD").clicked() {
+                    self.map.memory.selection = Some(MemorySelection::NewZone(NewZoneInfo::new(FixGnss::from_lon_lat(0.0, 0.0), 0.0)));
+                }
+            }
+            let mut delete = None;
+            for (zone_id, zone) in   self.fix_gnss.zones_list_mut() {
+                let selected = matches!(self.map.memory.selection, Some(selection) if selection == MemorySelection::Zone(zone_id));
+
+                let label = egui::RichText::new(zone.name.clone());
+                let label = if selected {
+                    label.strong()
+                } else {
+                    label
+                };
+                ui.label(label);
+                ui.horizontal(|ui| {
+                    if ui.button("EDIT").clicked() {
+                        self.map
+                            .map_memory
+                            .center_at(lon_lat(zone.center.longitude, zone.center.latitude));
+                        self.map.memory.selection = Some(MemorySelection::Zone(zone_id));
+                    }
+                    if ui.button("DEL").clicked() {
+                        delete = Some(zone_id);
+                    }
+                });
+
+                let label =
+                    egui::RichText::new(format!(
+                        "{:.6} {:.6} {:.2} m",
+                        zone.center.longitude, zone.center.latitude, zone.radius_meters));
+                if ui.label(label).clicked() {
+                    self.map
+                        .map_memory
+                        .center_at(lon_lat(zone.center.longitude, zone.center.latitude));
+                }
+            }
+            if let Some(zone_id) = delete {
+                self.fix_gnss.remove_zone(zone_id);
+            }
+        });
 
         PanelCommand::Nothing
     }
@@ -739,9 +873,9 @@ impl<'a> RosterPlugin for MapRosterPlugin<'a> {
             fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
                 .or(node_info.assumed_position)
         {
-            if self.fix_gnss.get(&node_info.node_id).is_some() {
+            if self.fix_gnss.node_get(&node_info.node_id).is_some() {
                 if ui.button("Move").clicked() {
-                    self.fix_gnss.remove(&node_info.node_id);
+                    self.fix_gnss.node_remove(&node_info.node_id);
                 }
             }
             if ui.button("Show on map").clicked() {

@@ -376,7 +376,7 @@ impl SoftNodeApp {
                     ..Default::default()
                 });
 
-                entry.update(&stored_mesh_packet);
+                entry.update(&stored_mesh_packet, &self.fix_gnss);
                 self.journal.push(stored_mesh_packet.clone().into());
                 affected_nodes.push(node_id);
             }
@@ -386,7 +386,7 @@ impl SoftNodeApp {
                     if node_info.position.is_empty()
                         && (!node_info.gateway_for.is_empty() || !node_info.gatewayed_by.is_empty())
                     {
-                        assume_position(node_info, &self.nodes)
+                        assume_position(node_info, &self.nodes, &self.fix_gnss)
                     } else {
                         None
                     }
