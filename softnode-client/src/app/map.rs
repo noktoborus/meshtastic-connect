@@ -998,7 +998,7 @@ impl<'a> RosterPlugin for MapRosterPlugin<'a> {
                     self.fix_gnss.node_remove(&node_info.node_id);
                 }
             }
-            if ui.button("Show on map").clicked() {
+            if ui.button("Go to position").clicked() {
                 self.map.memory.selection = Some(MemorySelection::Node(node_info.node_id));
                 self.map.map_memory.center_at(position);
                 return PanelCommand::NextPanel(Panel::Map);

@@ -72,7 +72,7 @@ impl Default for DownloadState {
 pub struct PersistentData {
     active_panel: Panel,
 
-    list_panel: Roster,
+    roster: Roster,
     map: MapPanel,
     update_interval_secs: std::time::Duration,
 }
@@ -101,7 +101,7 @@ impl Default for PersistentData {
     fn default() -> Self {
         Self {
             active_panel: Panel::Journal(Journal::new()),
-            list_panel: Default::default(),
+            roster: Default::default(),
             map: Default::default(),
             update_interval_secs: std::time::Duration::from_secs(5),
         }
@@ -442,6 +442,7 @@ impl Roster {
         mut nodes: Vec<&NodeInfo>,
         node_selected: Option<NodeId>,
         filter_by: ListPanelFilter,
+        hide_on_action: bool,
     ) -> Option<Panel> {
         let mut next_page = None;
 
@@ -549,7 +550,9 @@ impl Roster {
                 ui.horizontal(|ui| {
                     if !node_info.packet_statistics.is_empty() {
                         if ui.button("RSSI").clicked() {
-                            self.show = false;
+                            if hide_on_action {
+                                self.show = false;
+                            }
                             next_page = Some(Panel::Rssi(node_info.node_id, Default::default()));
                         }
                     }
@@ -559,7 +562,9 @@ impl Roster {
                             .button(format!("Gateway {}", node_info.gateway_for.len()))
                             .clicked()
                         {
-                            self.show = false;
+                            if hide_on_action {
+                                self.show = false;
+                            }
                             next_page =
                                 Some(Panel::Gateways(Some(node_info.node_id), Default::default()))
                         }
@@ -573,7 +578,9 @@ impl Roster {
                     //     return;
                     // }
                     PanelCommand::NextPanel(panel) => {
-                        self.show = false;
+                        if hide_on_action {
+                            self.show = false;
+                        }
                         next_page = Some(panel);
                         ui.ctx().request_repaint();
                         return;
@@ -629,7 +636,7 @@ impl SoftNodeApp {
                     let mut telemetry_list = Vec::new();
 
                     for (telemetry_variant, enabled_for) in
-                        self.persistent.list_panel.telemetry_enabled_for.iter()
+                        self.persistent.roster.telemetry_enabled_for.iter()
                     {
                         for node_id in enabled_for {
                             if let Some(node_info) = self.nodes.get(node_id) {
@@ -659,7 +666,7 @@ impl SoftNodeApp {
                     if telemetry_list.len() != 0 {
                         telemetry.ui(ui, start_datetime, telemetry_list, None, true, None)
                     } else {
-                        self.persistent.list_panel.show = true;
+                        self.persistent.roster.show = true;
                         ui.label("Select a telemetry on left panel to display");
                     }
                 });
@@ -883,10 +890,10 @@ impl eframe::App for SoftNodeApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             if ui
-                                .selectable_label(self.persistent.list_panel.show, "🔍")
+                                .selectable_label(self.persistent.roster.show, "🔍")
                                 .clicked()
                             {
-                                self.persistent.list_panel.show = !self.persistent.list_panel.show;
+                                self.persistent.roster.show = !self.persistent.roster.show;
                             }
 
                             let menu_text = match self.persistent.active_panel {
@@ -909,17 +916,17 @@ impl eframe::App for SoftNodeApp {
                             ui.menu_button(menu_text, |ui| {
                                 if ui.button("Journal").clicked() {
                                     self.persistent.active_panel = Panel::Journal(Journal::new());
-                                    self.persistent.list_panel.show = false;
+                                    self.persistent.roster.show = false;
                                 }
 
                                 if ui.button("Telemetry").clicked() {
                                     self.persistent.active_panel = Panel::Telemetry(Telemetry {});
-                                    self.persistent.list_panel.show = false;
+                                    self.persistent.roster.show = false;
                                 }
 
                                 if ui.button("Map").clicked() {
                                     self.persistent.active_panel = Panel::Map;
-                                    self.persistent.list_panel.show = false;
+                                    self.persistent.roster.show = false;
                                 }
                             });
 
@@ -941,7 +948,7 @@ impl eframe::App for SoftNodeApp {
                                 {
                                     self.persistent.active_panel =
                                         Panel::Settings(Settings::new(&self.keyring));
-                                    self.persistent.list_panel.show = false;
+                                    self.persistent.roster.show = false;
                                 }
                             });
                         })
@@ -956,18 +963,24 @@ impl eframe::App for SoftNodeApp {
             Panel::Map => ListPanelFilter::None,
         };
 
-        let list_panel = &mut self.persistent.list_panel;
+        let roster = &mut self.persistent.roster;
+        let hide_on_action = ctx.content_rect().width() < 400.0;
 
         // if ctx.content_rect().width() > 400.0 {
 
-        if list_panel.show {
+        if roster.show {
             let mut roster_plugin =
                 MapRosterPlugin::new(&mut self.persistent.map, &mut self.fix_gnss);
             let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
             egui::SidePanel::left("Roster").show(ctx, |ui| {
-                if let Some(next_panel) =
-                    list_panel.ui(ui, &mut roster_plugin, nodes_list, None, panel_filter)
-                {
+                if let Some(next_panel) = roster.ui(
+                    ui,
+                    &mut roster_plugin,
+                    nodes_list,
+                    None,
+                    panel_filter,
+                    hide_on_action,
+                ) {
                     self.persistent.active_panel = next_panel;
                 }
             });
