@@ -52,12 +52,29 @@ enum MemorySelection {
     NewZone(NewZoneInfo),
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, PartialEq, Clone)]
+struct TracksConfig {
+    enabled: bool,
+    stroke: egui::Stroke,
+}
+
+impl Default for TracksConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            stroke: egui::Stroke::new(1.0, Color32::BROWN),
+        }
+    }
+}
+
 #[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct Memory {
     gateway_connections: GatewayConnections,
     selection: Option<MemorySelection>,
     display_assumed_positions: bool,
+    display_tracks: DisplayTracks,
     hide_labels: bool,
+    selected_tracks: HashMap<NodeId, TracksConfig>,
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
@@ -620,6 +637,51 @@ impl<'a> MapPointsPlugin<'a> {
         }
     }
 
+    fn draw_tracks(self: &mut Box<Self>, ui: &mut egui::Ui, projector: &walkers::Projector) {
+        let default_tracks = Default::default();
+        for (node_id, node_info) in self.nodes {
+            if node_info.position.len() < 2 {
+                continue;
+            }
+
+            let tracks_config = self
+                .memory
+                .selected_tracks
+                .get(node_id)
+                .unwrap_or(&default_tracks);
+
+            let stroke = match self.memory.display_tracks {
+                DisplayTracks::All => tracks_config.stroke,
+                DisplayTracks::OnlySelected => {
+                    if tracks_config.enabled {
+                        tracks_config.stroke
+                    } else {
+                        continue;
+                    }
+                }
+            };
+
+            let total_segments = node_info.position.len() - 1;
+
+            for i in 0..total_segments {
+                let p1 = projector
+                    .project(lon_lat(
+                        node_info.position[i].longitude,
+                        node_info.position[i].latitude,
+                    ))
+                    .to_pos2();
+                let p2 = projector
+                    .project(lon_lat(
+                        node_info.position[i + 1].longitude,
+                        node_info.position[i + 1].latitude,
+                    ))
+                    .to_pos2();
+
+                ui.painter().line_segment([p1, p2], stroke);
+            }
+        }
+    }
+
     fn draw_zones(
         self: &mut Box<Self>,
         ui: &mut egui::Ui,
@@ -727,6 +789,8 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
             })
             .flatten();
 
+        self.draw_tracks(ui, projector);
+
         self.draw_zones(ui, response, projector, clicked_pos);
 
         if let Some(selection) = selection {
@@ -787,11 +851,29 @@ impl Display for GatewayConnections {
     }
 }
 
+// Gateway connections display mode
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize, PartialEq)]
+enum DisplayTracks {
+    // Display which nodes are heard by the this node
+    #[default]
+    All,
+    // Display anothers gateways, heard this node
+    OnlySelected,
+}
+
+impl Display for DisplayTracks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DisplayTracks::All => write!(f, "All"),
+            DisplayTracks::OnlySelected => write!(f, "Only selected"),
+        }
+    }
+}
+
 impl<'a> RosterPlugin for MapRosterPlugin<'a> {
     fn panel_header_ui(self: &mut Self, ui: &mut egui::Ui) -> PanelCommand {
         ui.collapsing("Map settings", |ui| {
-            ui.label("Display gateway connections");
-            egui::ComboBox::from_label("")
+            egui::ComboBox::from_label("gateway connections")
                 .selected_text(self.map.memory.gateway_connections.to_string())
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
@@ -810,6 +892,20 @@ impl<'a> RosterPlugin for MapRosterPlugin<'a> {
                 "Display assumed positions",
             );
             ui.checkbox(&mut self.map.memory.hide_labels, "Hide node's labels");
+            egui::ComboBox::from_label("tracks")
+                .selected_text(self.map.memory.display_tracks.to_string())
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.map.memory.display_tracks,
+                        DisplayTracks::All,
+                        "All",
+                    );
+                    ui.selectable_value(
+                        &mut self.map.memory.display_tracks,
+                        DisplayTracks::OnlySelected,
+                        "Only selected",
+                    );
+                });
         });
         ui.collapsing("GNSS Spoofing Zones", |ui| {
             if let Some(MemorySelection::NewZone(zone)) = self.map.memory.selection {
@@ -869,6 +965,30 @@ impl<'a> RosterPlugin for MapRosterPlugin<'a> {
     }
 
     fn panel_node_ui(self: &mut Self, ui: &mut egui::Ui, node_info: &NodeInfo) -> PanelCommand {
+        ui.push_id(node_info.node_id, |ui| {
+            ui.collapsing(
+                format!("Tracks ({} points)", node_info.position.len()),
+                |ui| {
+                    if let Some(tracks_config) =
+                        self.map.memory.selected_tracks.get_mut(&node_info.node_id)
+                    {
+                        ui.checkbox(&mut tracks_config.enabled, "Show on map");
+                        ui.add(&mut tracks_config.stroke);
+                    } else {
+                        let mut enabled = false;
+                        ui.checkbox(&mut enabled, "Show on map");
+
+                        if enabled {
+                            self.map
+                                .memory
+                                .selected_tracks
+                                .insert(node_info.node_id, TracksConfig::default());
+                        }
+                    }
+                },
+            );
+        });
+
         if let Some(position) =
             fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
                 .or(node_info.assumed_position)
