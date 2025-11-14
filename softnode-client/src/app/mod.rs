@@ -273,6 +273,8 @@ fn go_download(
                             response.status,
                             response.status_text
                         );
+                        *state.lock() = DownloadState::Idle;
+                        egui_ctx.request_repaint();
                         ControlFlow::Break(())
                     }
                 },
