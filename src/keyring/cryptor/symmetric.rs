@@ -39,6 +39,8 @@ fn crypt(
             .try_apply_keystream(buffer.as_mut_bytes()),
         Key::K256(key) => Ctr128BE::<Aes256>::new(key.as_bytes().into(), &nonce.into())
             .try_apply_keystream(buffer.as_mut_bytes()),
+        Key::KIndex(key) => Ctr128BE::<Aes128>::new(key.as_bytes().into(), &nonce.into())
+            .try_apply_keystream(buffer.as_mut_bytes()),
     }?;
     Ok(buffer)
 }

@@ -5,14 +5,21 @@ use serde::ser::{Serialize, Serializer};
 use std::fmt;
 use x25519_dalek::{PublicKey, StaticSecret};
 
+// Short key, non-secure key uses a static part
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash)]
+pub struct KIndex(pub [u8; 16]);
+
+// AES-128
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash)]
 pub struct K128(pub [u8; 16]);
 
+// AES-256
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash)]
 pub struct K256(pub [u8; 32]);
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash)]
 pub enum Key {
+    KIndex(KIndex),
     K128(K128),
     K256(K256),
 }
@@ -30,6 +37,22 @@ impl Default for K256 {
         let mut rng = rand::rng();
 
         K256(rng.random())
+    }
+}
+
+const DEFAULT_PSK: [u8; 16] = [
+    0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01,
+];
+
+impl Default for KIndex {
+    fn default() -> Self {
+        Self(DEFAULT_PSK)
+    }
+}
+
+impl KIndex {
+    pub fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
     }
 }
 
@@ -54,6 +77,7 @@ impl K128 {
 impl Key {
     pub fn as_bytes(&self) -> &[u8] {
         match self {
+            Key::KIndex(kindex) => kindex.as_bytes(),
             Key::K128(k128) => k128.as_bytes(),
             Key::K256(k256) => k256.as_bytes(),
         }
@@ -72,9 +96,22 @@ impl From<[u8; 32]> for K256 {
     }
 }
 
+impl From<[u8; 1]> for KIndex {
+    fn from(value: [u8; 1]) -> Self {
+        println!("Creating KIndex from {:?}", value);
+        let index = value[0];
+        let mut key = DEFAULT_PSK;
+        // Reference: https://github.com/meshtastic/firmware/blob/0e3e8b7607ffdeeabc34a3a349e108e0c3a1363d/src/mesh/Channels.cpp#L236
+        // Bump last byte to channel index where Index=0x01 means no default psk change
+        key[15] = index;
+        KIndex(key)
+    }
+}
+
 impl fmt::Display for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Key::KIndex(kindex) => write!(f, "{}", kindex),
             Key::K128(key) => write!(f, "{}", key),
             Key::K256(key) => write!(f, "{}", key),
         }
@@ -90,6 +127,12 @@ impl fmt::Display for K256 {
 impl fmt::Display for K128 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", general_purpose::STANDARD.encode(self.0))
+    }
+}
+
+impl fmt::Display for KIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", general_purpose::STANDARD.encode(&[self.0[15]]))
     }
 }
 
@@ -109,7 +152,43 @@ impl TryFrom<&str> for K256 {
     }
 }
 
+impl TryFrom<&str> for KIndex {
+    type Error = String;
+
+    // From Base64 string
+    fn try_from(base64_key: &str) -> Result<Self, Self::Error> {
+        let bytes = general_purpose::STANDARD
+            .decode(base64_key)
+            .map_err(|e| e.to_string())?;
+
+        bytes.try_into()
+    }
+}
+
+impl TryFrom<Vec<u8>> for KIndex {
+    type Error = String;
+
+    // From Base64 string
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        match bytes.len() {
+            1 => Ok([bytes[0]]
+                .try_into()
+                .map_err(|e| format!("Unsupported input for indexed key: {:?}", e))?),
+            unsupported_size => Err(format!("Unsupported key size: {} bytes", unsupported_size)),
+        }
+    }
+}
+
 impl TryFrom<String> for K256 {
+    type Error = String;
+
+    // From Base64 string
+    fn try_from(base64_key: String) -> Result<Self, Self::Error> {
+        base64_key.as_str().try_into()
+    }
+}
+
+impl TryFrom<String> for KIndex {
     type Error = String;
 
     // From Base64 string
@@ -146,8 +225,21 @@ impl TryFrom<Vec<u8>> for Key {
     // From Base64 string
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         match bytes.len() {
-            32 => Ok(Key::K256(K256(bytes.try_into().unwrap()))),
-            16 => Ok(Key::K128(K128(bytes.try_into().unwrap()))),
+            1 => {
+                Ok(Key::KIndex(bytes.try_into().map_err(|e| {
+                    format!("KIndex unsupported data: {:#x?}", e)
+                })?))
+            }
+            32 => {
+                Ok(Key::K256(K256(bytes.try_into().map_err(|e| {
+                    format!("K256 unsupported data: {:#x?}", e)
+                })?)))
+            }
+            16 => {
+                Ok(Key::K128(K128(bytes.try_into().map_err(|e| {
+                    format!("K128 unsupported data: {:#x?}", e)
+                })?)))
+            }
             unsupported_size => Err(format!("Unsupported key size: {} bytes", unsupported_size)),
         }
     }
