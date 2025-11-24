@@ -11,11 +11,11 @@ use walkers::{
     sources::OpenStreetMap,
 };
 
+use crate::app::roster;
 use crate::app::{
-    Panel, PanelCommand, color_generator,
+    Panel, color_generator,
     data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
     fix_gnss::{FixGnss, FixGnssLibrary, IgnoreZone, ZoneId},
-    roster::RosterPlugin,
 };
 
 pub struct MapContext {
@@ -870,8 +870,8 @@ impl Display for DisplayTracks {
     }
 }
 
-impl<'a> RosterPlugin for MapRosterPlugin<'a> {
-    fn panel_header_ui(self: &mut Self, ui: &mut egui::Ui) -> PanelCommand {
+impl<'a> roster::Plugin for MapRosterPlugin<'a> {
+    fn panel_header_ui(self: &mut Self, ui: &mut egui::Ui) -> roster::PanelCommand {
         ui.collapsing("Map settings", |ui| {
             egui::ComboBox::from_label("gateway connections")
                 .selected_text(self.map.memory.gateway_connections.to_string())
@@ -961,10 +961,14 @@ impl<'a> RosterPlugin for MapRosterPlugin<'a> {
             }
         });
 
-        PanelCommand::Nothing
+        roster::PanelCommand::Nothing
     }
 
-    fn panel_node_ui(self: &mut Self, ui: &mut egui::Ui, node_info: &NodeInfo) -> PanelCommand {
+    fn panel_node_ui(
+        self: &mut Self,
+        ui: &mut egui::Ui,
+        node_info: &NodeInfo,
+    ) -> roster::PanelCommand {
         ui.push_id(node_info.node_id, |ui| {
             ui.collapsing(
                 format!("Tracks ({} points)", node_info.position.len()),
@@ -1001,16 +1005,16 @@ impl<'a> RosterPlugin for MapRosterPlugin<'a> {
             if ui.button("Go to position").clicked() {
                 self.map.memory.selection = Some(MemorySelection::Node(node_info.node_id));
                 self.map.map_memory.center_at(position);
-                return PanelCommand::NextPanel(Panel::Map);
+                return roster::PanelCommand::NextPanel(Panel::Map);
             }
         } else {
             if ui.button("Set position").clicked() {
                 self.map.memory.selection = Some(MemorySelection::Node(node_info.node_id));
-                return PanelCommand::NextPanel(Panel::Map);
+                return roster::PanelCommand::NextPanel(Panel::Map);
             }
         }
 
-        PanelCommand::Nothing
+        roster::PanelCommand::Nothing
     }
 }
 
