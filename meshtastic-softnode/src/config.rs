@@ -370,7 +370,7 @@ impl Default for KeyringConfig {
         Self {
             channels: vec![Channel {
                 name: "LongFast".into(),
-                key: "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
+                key: "AQ==".try_into().unwrap(),
             }],
             peers: vec![],
         }

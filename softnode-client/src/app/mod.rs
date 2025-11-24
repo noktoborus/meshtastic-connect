@@ -145,10 +145,7 @@ fn default_keyring() -> Keyring {
         "LongSlow",
     ] {
         keyring
-            .add_channel(
-                channel_name.into(),
-                "1PG7OiApB1nwvP+rz05pAQ==".try_into().unwrap(),
-            )
+            .add_channel(channel_name.into(), "AQ==".try_into().unwrap())
             .unwrap();
     }
 
