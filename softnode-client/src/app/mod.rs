@@ -569,7 +569,7 @@ impl SoftNodeApp {
                 }
             }
             Panel::Gateways(gateway_id, telemetry) => {
-                if let Some(gateway_info) = gateway_id.map(|v| self.nodes.get(&v)).flatten() {
+                if let Some(gateway_info) = self.nodes.get(gateway_id) {
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                     let mut max_rssi = f32::MIN;
                     let rssi = gateway_info
@@ -622,7 +622,7 @@ impl SoftNodeApp {
                                 ui,
                                 start_datetime,
                                 rssi_with_refs,
-                                Some(format!("{} RSSI", gateway_id.unwrap())),
+                                Some(format!("{} RSSI", gateway_id)),
                                 false,
                                 Some(max_rssi),
                             )
@@ -689,11 +689,7 @@ impl eframe::App for SoftNodeApp {
                                     format!("Outcome radio {}", node_id)
                                 }
                                 Panel::Gateways(node_id, _) => {
-                                    if node_id.is_some() {
-                                        format!("Income radio ({})", node_id.unwrap())
-                                    } else {
-                                        "Income radio".into()
-                                    }
+                                    format!("Income radio ({})", node_id)
                                 }
                                 Panel::Map => "Map".into(),
                             };

@@ -16,7 +16,7 @@ pub enum Panel {
     Telemetry(Telemetry),
     Settings(Settings),
     Rssi(NodeId, Telemetry),
-    Gateways(Option<NodeId>, Telemetry),
+    Gateways(NodeId, Telemetry),
     Map,
 }
 
@@ -171,8 +171,7 @@ impl Roster {
                             if hide_on_action {
                                 self.show = false;
                             }
-                            next_page =
-                                Some(Panel::Gateways(Some(node_info.node_id), Default::default()))
+                            next_page = Some(Panel::Gateways(node_info.node_id, Default::default()))
                         }
                     }
                 });
