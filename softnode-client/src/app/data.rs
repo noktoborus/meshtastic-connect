@@ -279,6 +279,11 @@ pub enum TelemetryVariant {
     PowerMetricVoltage(usize),
     // power metric with channel no (1-3)
     PowerMetricCurrent(usize),
+    //
+    AirUtilTx,
+    ChannelUtilization,
+    Voltage,
+    BatteryLevel,
 }
 
 impl Display for TelemetryVariant {
@@ -297,6 +302,10 @@ impl Display for TelemetryVariant {
             TelemetryVariant::PowerMetricCurrent(channel) => {
                 write!(f, "Current ch. {}", channel)
             }
+            TelemetryVariant::AirUtilTx => write!(f, "Device Air Util Tx"),
+            TelemetryVariant::ChannelUtilization => write!(f, "Device Channel Utilization"),
+            TelemetryVariant::Voltage => write!(f, "Device Voltage"),
+            TelemetryVariant::BatteryLevel => write!(f, "Device Battery Level"),
         }
     }
 }
@@ -518,8 +527,35 @@ impl NodeInfo {
                 let timestamp = stored_timestamp;
 
                 match telemetry.variant.ok_or(format!("Telemetry is empty"))? {
-                    meshtastic::telemetry::Variant::DeviceMetrics(_device_metrics) => {
-                        log::info!("Telemetry::DeviceMetrics ignored");
+                    meshtastic::telemetry::Variant::DeviceMetrics(device_metrics) => {
+                        if let Some(air_util_tx) = device_metrics.air_util_tx {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::AirUtilTx,
+                                air_util_tx as f64,
+                            );
+                        }
+                        if let Some(channel_utilization) = device_metrics.channel_utilization {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::ChannelUtilization,
+                                channel_utilization as f64,
+                            );
+                        }
+                        if let Some(voltage) = device_metrics.voltage {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::Voltage,
+                                voltage as f64,
+                            );
+                        }
+                        if let Some(battery_level) = device_metrics.battery_level {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::BatteryLevel,
+                                battery_level as f64,
+                            );
+                        }
                     }
                     meshtastic::telemetry::Variant::EnvironmentMetrics(environment_metrics) => {
                         if let Some(barometric) = environment_metrics.barometric_pressure {
