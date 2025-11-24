@@ -568,13 +568,14 @@ impl SoftNodeApp {
                     });
                 }
             }
-            Panel::Gateways(gateway_id, telemetry) => {
+            Panel::GatewayByRSSI(gateway_id, telemetry) => {
                 if let Some(gateway_info) = self.nodes.get(gateway_id) {
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                     let mut max_rssi = f32::MIN;
                     let rssi = gateway_info
                         .gateway_for
                         .iter()
+                        .filter(|(k, _)| *k != gateway_id)
                         .map(|(k, v)| {
                             (
                                 k,
@@ -643,6 +644,67 @@ impl SoftNodeApp {
                     )
                 });
             }
+            Panel::GatewayByHops(gateway_id, telemetry) => {
+                if let Some(gateway_info) = self.nodes.get(gateway_id) {
+                    let mut start_datetime = DateTime::<Utc>::MAX_UTC;
+                    let hops = gateway_info
+                        .gateway_for
+                        .iter()
+                        .filter(|(k, _)| *k != gateway_id)
+                        .map(|(k, v)| {
+                            (
+                                k,
+                                v.iter()
+                                    .map(|v| {
+                                        start_datetime = v.timestamp.min(start_datetime);
+                                        NodeTelemetry {
+                                            timestamp: v.timestamp,
+                                            value: if let Some(hop_distance) = v.hop_distance {
+                                                hop_distance as f64
+                                            } else {
+                                                -(v.hop_limit as f64)
+                                            },
+                                        }
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let hops_with_refs: Vec<_> = hops
+                        .iter()
+                        .map(|(node_id, v)| {
+                            (
+                                if let Some(extended_info) = self
+                                    .nodes
+                                    .get(node_id)
+                                    .map(|node_info| node_info.extended_info_history.last())
+                                    .flatten()
+                                {
+                                    format!("{} {}", node_id, extended_info.short_name)
+                                } else {
+                                    node_id.to_string()
+                                },
+                                v,
+                            )
+                        })
+                        .collect();
+
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        if hops.len() != 0 {
+                            telemetry.ui(
+                                ui,
+                                start_datetime,
+                                hops_with_refs,
+                                Some(format!("{} hops", gateway_id)),
+                                false,
+                                None,
+                            )
+                        } else {
+                            ui.label("No data");
+                        }
+                    });
+                }
+            }
         };
     }
 }
@@ -688,10 +750,13 @@ impl eframe::App for SoftNodeApp {
                                 Panel::Rssi(node_id, _) => {
                                     format!("Outcome radio {}", node_id)
                                 }
-                                Panel::Gateways(node_id, _) => {
-                                    format!("Income radio ({})", node_id)
+                                Panel::GatewayByRSSI(node_id, _) => {
+                                    format!("Income RSSI ({})", node_id)
                                 }
                                 Panel::Map => "Map".into(),
+                                Panel::GatewayByHops(node_id, _) => {
+                                    format!("Income hops ({})", node_id)
+                                }
                             };
 
                             ui.menu_button(menu_text, |ui| {
@@ -740,7 +805,7 @@ impl eframe::App for SoftNodeApp {
         let panel_filter = match self.persistent.active_panel {
             Panel::Journal(_) | Panel::Settings(_) | Panel::Rssi(_, _) => ListPanelFilter::None,
             Panel::Telemetry(_) => ListPanelFilter::Telemetry,
-            Panel::Gateways(_, _) => ListPanelFilter::Gateway,
+            Panel::GatewayByRSSI(_, _) | Panel::GatewayByHops(_, _) => ListPanelFilter::Gateway,
             Panel::Map => ListPanelFilter::None,
         };
 

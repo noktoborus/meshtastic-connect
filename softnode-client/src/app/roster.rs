@@ -16,7 +16,8 @@ pub enum Panel {
     Telemetry(Telemetry),
     Settings(Settings),
     Rssi(NodeId, Telemetry),
-    Gateways(NodeId, Telemetry),
+    GatewayByRSSI(NodeId, Telemetry),
+    GatewayByHops(NodeId, Telemetry),
     Map,
 }
 
@@ -164,15 +165,26 @@ impl Roster {
                     }
 
                     if !node_info.gateway_for.is_empty() {
-                        if ui
-                            .button(format!("Gateway {}", node_info.gateway_for.len()))
-                            .clicked()
-                        {
-                            if hide_on_action {
-                                self.show = false;
+                        ui.menu_button(format!("Gateway {}", node_info.gateway_for.len()), |ui| {
+                            if ui.button("by RSSI").clicked() {
+                                if hide_on_action {
+                                    self.show = false;
+                                }
+                                next_page = Some(Panel::GatewayByRSSI(
+                                    node_info.node_id,
+                                    Default::default(),
+                                ))
                             }
-                            next_page = Some(Panel::Gateways(node_info.node_id, Default::default()))
-                        }
+                            if ui.button("by Hops").clicked() {
+                                if hide_on_action {
+                                    self.show = false;
+                                }
+                                next_page = Some(Panel::GatewayByHops(
+                                    node_info.node_id,
+                                    Default::default(),
+                                ))
+                            }
+                        });
                     }
                 });
                 match roster_plugin.panel_node_ui(ui, node_info) {
