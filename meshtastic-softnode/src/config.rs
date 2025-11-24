@@ -44,7 +44,7 @@ pub(crate) struct MQTTConfig {
     pub(crate) server: SocketAddr,
     pub(crate) username: String,
     pub(crate) password: String,
-    pub(crate) topic: String,
+    pub(crate) topic: Vec<String>,
 }
 
 impl Default for MQTTConfig {
@@ -53,7 +53,7 @@ impl Default for MQTTConfig {
             server: "127.0.0.1:1883".parse().unwrap(),
             username: String::new(),
             password: String::new(),
-            topic: "msh".into(),
+            topic: vec!["msh".into()],
         }
     }
 }

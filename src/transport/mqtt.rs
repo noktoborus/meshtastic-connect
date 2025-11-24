@@ -1,6 +1,6 @@
 use crate::{keyring::node_id::NodeId, meshtastic};
 use prost::Message;
-use rumqttc::{AsyncClient, EventLoop, MqttOptions, QoS};
+use rumqttc::{AsyncClient, EventLoop, MqttOptions, QoS, SubscribeFilter};
 use std::{net::SocketAddr, time::Duration};
 
 // Root topic
@@ -11,7 +11,7 @@ pub type ChannelId = String;
 
 pub struct MqttMeta {
     gateway: NodeId,
-    root_topic: Topic,
+    root_topics: Vec<Topic>,
 }
 
 pub struct Mqtt {
@@ -35,7 +35,7 @@ pub struct MqttBuilder {
     pub password: String,
     // Gateway ID to publish messages from
     pub gateway: NodeId,
-    pub root_topic: Topic,
+    pub root_topic: Vec<Topic>,
 }
 
 impl MqttBuilder {
@@ -44,7 +44,7 @@ impl MqttBuilder {
         username: String,
         password: String,
         gateway: NodeId,
-        root_topic: Topic,
+        root_topic: Vec<Topic>,
     ) -> Self {
         Self {
             server,
@@ -64,21 +64,22 @@ impl MqttBuilder {
         mqttoptions.set_keep_alive(Duration::from_secs(10));
         mqttoptions.set_credentials(self.username.clone(), self.password.clone());
 
-        let topic = format!("{}/2/e/+/+", self.root_topic);
+        let topics = self
+            .root_topic
+            .iter()
+            .map(|v| SubscribeFilter::new(format!("{}/2/e/+/+", v), QoS::AtMostOnce));
+
         let (client, event_loop) = AsyncClient::new(mqttoptions, 30);
-        client
-            .subscribe(topic, QoS::AtMostOnce)
-            .await
-            .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("MQTT subscription failed: {}", e),
-                )
-            })?;
+        client.subscribe_many(topics).await.map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("MQTT subscription failed: {}", e),
+            )
+        })?;
 
         let data = MqttMeta {
             gateway: self.gateway,
-            root_topic: self.root_topic.clone(),
+            root_topics: self.root_topic.clone(),
         };
         let reader = MqttReceiver { event_loop };
         let writer = MqttSender { mqtt: data, client };
@@ -133,27 +134,25 @@ type MqttSendData = (ChannelId, meshtastic::MeshPacket);
 
 impl MqttSender {
     pub async fn send(&mut self, send_data: MqttSendData) -> Result<(), std::io::Error> {
-        let (channel_id, mesh_packet) = send_data;
-        let topic = format!(
-            "{}/2/e/{}/{}",
-            self.mqtt.root_topic, channel_id, self.mqtt.gateway
-        );
-        let service_envelope = meshtastic::ServiceEnvelope {
-            packet: Some(mesh_packet),
-            channel_id,
-            gateway_id: self.mqtt.gateway.into(),
-        };
+        let (ref channel_id, mesh_packet) = send_data;
+        for root_topic in &self.mqtt.root_topics {
+            let topic = format!("{}/2/e/{}/{}", root_topic, channel_id, self.mqtt.gateway);
+            let service_envelope = meshtastic::ServiceEnvelope {
+                packet: Some(mesh_packet.clone()),
+                channel_id: channel_id.clone(),
+                gateway_id: self.mqtt.gateway.into(),
+            };
 
-        self.client
-            .publish(
-                topic,
-                QoS::AtLeastOnce,
-                false,
-                service_envelope.encode_to_vec(),
-            )
-            .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, e))?;
-
+            self.client
+                .publish(
+                    topic,
+                    QoS::AtLeastOnce,
+                    false,
+                    service_envelope.encode_to_vec(),
+                )
+                .await
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, e))?;
+        }
         Ok(())
     }
 }

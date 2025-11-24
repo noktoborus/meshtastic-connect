@@ -297,7 +297,7 @@ pub async fn build(
         }
         config::SoftNodeVariant::MQTT(mqttconfig) => {
             println!(
-                "Connect MQTT to {}@{} {}",
+                "Connect MQTT to {}@{} {:?}",
                 mqttconfig.username, mqttconfig.server, mqttconfig.topic
             );
 
