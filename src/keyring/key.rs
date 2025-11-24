@@ -98,7 +98,6 @@ impl From<[u8; 32]> for K256 {
 
 impl From<[u8; 1]> for KIndex {
     fn from(value: [u8; 1]) -> Self {
-        println!("Creating KIndex from {:?}", value);
         let index = value[0];
         let mut key = DEFAULT_PSK;
         // Reference: https://github.com/meshtastic/firmware/blob/0e3e8b7607ffdeeabc34a3a349e108e0c3a1363d/src/mesh/Channels.cpp#L236
