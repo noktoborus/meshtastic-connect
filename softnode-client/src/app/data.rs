@@ -14,7 +14,10 @@ pub struct JournalData {
     pub timestamp: DateTime<Utc>,
     pub id: u32,
     pub from: NodeId,
-    pub to: String,
+    pub to: NodeId,
+    pub channel: u32,
+    pub is_pki: bool,
+    pub is_encrypted: bool,
     pub gateway: Option<NodeId>,
     pub relay: ByteNodeId,
     pub message_type: String,
@@ -24,24 +27,21 @@ pub struct JournalData {
 impl From<StoredMeshPacket> for JournalData {
     fn from(stored_mesh_packet: StoredMeshPacket) -> Self {
         let message_type;
-        let message_hint;
-        let mut to = stored_mesh_packet.header.to.into();
+        let is_encrypted;
+        let mut message_hint;
 
         if let Some(data) = stored_mesh_packet.data {
             match data {
                 DataVariant::Encrypted(_) => {
                     message_type = "<encrypted>".into();
                     message_hint = "".into();
+                    is_encrypted = true;
                 }
-                DataVariant::Decrypted(target, data) => {
-                    match target {
-                        DecryptTarget::Direct(channel_hash) => {
-                            to = format!("{}:0x{:02x}", to, channel_hash);
-                        }
-                        DecryptTarget::PKI => {}
-                        DecryptTarget::Channel(channel) => {
-                            to = channel.clone();
-                        }
+                DataVariant::Decrypted(decrypt_target, data) => {
+                    match decrypt_target {
+                        DecryptTarget::Direct(_) => is_encrypted = false,
+                        DecryptTarget::PKI => is_encrypted = true,
+                        DecryptTarget::Channel(_) => is_encrypted = true,
                     }
                     message_type = data.portnum().as_str_name().into();
                     message_hint = match data.portnum() {
@@ -85,31 +85,42 @@ impl From<StoredMeshPacket> for JournalData {
                         _ => "".into(),
                     };
                 }
-                DataVariant::DecryptError(decrypt_error, _) => match decrypt_error {
-                    DecryptError::DecryptorNotFound => {
-                        message_type = "<encrypted>".into();
-                        message_hint = "".into();
+                DataVariant::DecryptError(decrypt_error, _) => {
+                    is_encrypted = true;
+                    match decrypt_error {
+                        DecryptError::DecryptorNotFound => {
+                            message_type = "<encrypted>".into();
+                            message_hint = "".into();
+                        }
+                        DecryptError::DecryptFailed => {
+                            message_type = "<decrypt error>".into();
+                            message_hint = "error while decrypting".into();
+                        }
+                        DecryptError::ConstructFailed => {
+                            message_type = "<decrypt error>".into();
+                            message_hint = "protobuf error".into();
+                        }
                     }
-                    DecryptError::DecryptFailed => {
-                        message_type = "<decrypt error>".into();
-                        message_hint = "error while decrypting".into();
-                    }
-                    DecryptError::ConstructFailed => {
-                        message_type = "<decrypt error>".into();
-                        message_hint = "protobuf error".into();
-                    }
-                },
+                }
             }
         } else {
+            is_encrypted = false;
             message_type = "<empty>".into();
             message_hint = "".into();
         };
+
+        if stored_mesh_packet.header.pki_encrypted {
+            message_hint = format!("PKI {}", message_hint)
+        }
 
         JournalData {
             id: stored_mesh_packet.header.id,
             timestamp: stored_mesh_packet.store_timestamp,
             from: stored_mesh_packet.header.from,
-            to,
+            to: stored_mesh_packet.header.to,
+            channel: stored_mesh_packet.header.channel,
+            is_pki: stored_mesh_packet.header.pki_encrypted,
+            is_encrypted,
             gateway: stored_mesh_packet.gateway,
             relay: stored_mesh_packet.header.relay_node,
             message_type,
