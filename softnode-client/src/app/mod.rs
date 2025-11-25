@@ -14,12 +14,13 @@ use chrono::{DateTime, Utc};
 use data::{JournalData, NodeInfo, NodeTelemetry, StoredMeshPacket};
 use egui::mutex::Mutex;
 use fix_gnss::FixGnssLibrary;
-use journal::Journal;
+use journal::JournalPanel;
 use map::MapPanel;
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;
 
+use crate::app::journal::JournalRosterPlugin;
 use crate::app::map::{MapContext, MapRosterPlugin};
 use crate::app::radio_center::assume_position;
 use crate::app::roster::{Panel, Roster};
@@ -63,6 +64,7 @@ pub struct PersistentData {
     pub active_panel: Panel,
 
     pub roster: Roster,
+    pub journal: JournalPanel,
     pub map: MapPanel,
     pub update_interval_secs: std::time::Duration,
 }
@@ -90,7 +92,8 @@ pub struct SoftNodeApp {
 impl Default for PersistentData {
     fn default() -> Self {
         Self {
-            active_panel: Panel::Journal(Journal::new()),
+            active_panel: Panel::Journal,
+            journal: JournalPanel::new(),
             roster: Default::default(),
             map: Default::default(),
             update_interval_secs: std::time::Duration::from_secs(5),
@@ -411,8 +414,9 @@ pub enum ListPanelFilter {
 impl SoftNodeApp {
     fn update_central_panel(&mut self, ctx: &egui::Context) {
         match &mut self.persistent.active_panel {
-            Panel::Journal(journal) => {
-                egui::CentralPanel::default().show(ctx, |ui| journal.ui(ui, &self.journal));
+            Panel::Journal => {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| self.persistent.journal.ui(ui, &self.journal));
             }
             Panel::Telemetry(telemetry) => {
                 let frame = egui::Frame::default().inner_margin(0);
@@ -471,7 +475,7 @@ impl SoftNodeApp {
                     self.bootstrap_done = false;
                     self.nodes.clear();
                     self.journal.clear();
-                    self.persistent.active_panel = Panel::Journal(Journal::new());
+                    self.persistent.active_panel = Panel::Journal;
                     ctx.request_repaint();
                 }
             }
@@ -744,7 +748,7 @@ impl eframe::App for SoftNodeApp {
                             }
 
                             let menu_text = match self.persistent.active_panel {
-                                Panel::Journal(_) => "Journal".into(),
+                                Panel::Journal => "Journal".into(),
                                 Panel::Telemetry(_) => "Telemetry".into(),
                                 Panel::Settings(_) => "Settings".into(),
                                 Panel::Rssi(node_id, _) => {
@@ -761,7 +765,7 @@ impl eframe::App for SoftNodeApp {
 
                             ui.menu_button(menu_text, |ui| {
                                 if ui.button("Journal").clicked() {
-                                    self.persistent.active_panel = Panel::Journal(Journal::new());
+                                    self.persistent.active_panel = Panel::Journal;
                                     self.persistent.roster.show = false;
                                 }
 
@@ -803,7 +807,7 @@ impl eframe::App for SoftNodeApp {
         });
 
         let panel_filter = match self.persistent.active_panel {
-            Panel::Journal(_) | Panel::Settings(_) | Panel::Rssi(_, _) => ListPanelFilter::None,
+            Panel::Journal | Panel::Settings(_) | Panel::Rssi(_, _) => ListPanelFilter::None,
             Panel::Telemetry(_) => ListPanelFilter::Telemetry,
             Panel::GatewayByRSSI(_, _) | Panel::GatewayByHops(_, _) => ListPanelFilter::Gateway,
             Panel::Map => ListPanelFilter::None,
@@ -815,13 +819,15 @@ impl eframe::App for SoftNodeApp {
         // if ctx.content_rect().width() > 400.0 {
 
         if roster.show {
-            let mut roster_plugin =
-                MapRosterPlugin::new(&mut self.persistent.map, &mut self.fix_gnss);
+            let map_plugin = Box::new(MapRosterPlugin::new(
+                &mut self.persistent.map,
+                &mut self.fix_gnss,
+            ));
             let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
             egui::SidePanel::left("Roster").show(ctx, |ui| {
                 if let Some(next_panel) = roster.ui(
                     ui,
-                    &mut roster_plugin,
+                    vec![map_plugin],
                     nodes_list,
                     None,
                     panel_filter,
