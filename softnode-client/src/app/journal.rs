@@ -2,18 +2,20 @@ use chrono::NaiveDate;
 use egui::{Label, ScrollArea, TextWrapMode};
 use egui_extras::{Column, TableBuilder, TableRow};
 
+use crate::app::{data::NodeInfo, roster};
+
 use super::data::JournalData;
 
 const SHOW_LIMIT_BASE: usize = 150;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
-pub struct Journal {
+pub struct JournalPanel {
     show_limit: usize,
 }
 
-impl Journal {
+impl JournalPanel {
     pub fn new() -> Self {
-        Journal {
+        JournalPanel {
             show_limit: SHOW_LIMIT_BASE,
         }
     }
@@ -122,5 +124,29 @@ impl Journal {
                     body.rows(row_height, journal.len(), add_row_content);
                 });
         });
+    }
+}
+
+pub struct JournalRosterPlugin<'a> {
+    journal: &'a mut JournalPanel,
+}
+
+impl<'a> JournalRosterPlugin<'a> {
+    pub fn new(journal: &'a mut JournalPanel) -> Self {
+        Self { journal }
+    }
+}
+
+impl<'a> roster::Plugin for JournalRosterPlugin<'a> {
+    fn panel_header_ui(self: &mut Self, ui: &mut egui::Ui) -> roster::PanelCommand {
+        roster::PanelCommand::Nothing
+    }
+
+    fn panel_node_ui(
+        self: &mut Self,
+        ui: &mut egui::Ui,
+        node_info: &NodeInfo,
+    ) -> roster::PanelCommand {
+        roster::PanelCommand::Nothing
     }
 }

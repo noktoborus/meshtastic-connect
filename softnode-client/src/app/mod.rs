@@ -823,11 +823,12 @@ impl eframe::App for SoftNodeApp {
                 &mut self.persistent.map,
                 &mut self.fix_gnss,
             ));
+            let journal_plugin = Box::new(JournalRosterPlugin::new(&mut self.persistent.journal));
             let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
             egui::SidePanel::left("Roster").show(ctx, |ui| {
                 if let Some(next_panel) = roster.ui(
                     ui,
-                    vec![map_plugin],
+                    vec![map_plugin, journal_plugin],
                     nodes_list,
                     None,
                     panel_filter,
