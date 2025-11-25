@@ -31,14 +31,6 @@ pub(crate) struct Args {
     pub(crate) keys_file: String,
 }
 
-#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub(crate) struct TransitConfig {
-    // Transit if this is destination. Transit all if empty.
-    pub(crate) to: Vec<NodeId>,
-    // Transit if this is source. Transit all if empty.
-    pub(crate) from: Vec<NodeId>,
-}
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub(crate) struct MQTTConfig {
     pub(crate) server: SocketAddr,

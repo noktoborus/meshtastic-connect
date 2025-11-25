@@ -87,6 +87,7 @@ async fn handle_timer_event(
             .insert_packet(
                 soft_node.node_id.into(),
                 &soft_node.node_id.into(),
+                Some("self-generated".to_string()),
                 &mesh_packet,
                 Some(channel.name.clone()),
                 Some(port_num),
@@ -122,6 +123,7 @@ async fn handle_network_event(
                             .insert_packet(
                                 gateway,
                                 &recv_capsule.source_connection_name,
+                                recv_capsule.incoming.connection_hint,
                                 &mesh_packet,
                                 None,
                                 Some(data.portnum()),
@@ -163,6 +165,7 @@ async fn handle_network_event(
                                 .insert_packet(
                                     gateway,
                                     &recv_capsule.source_connection_name,
+                                    recv_capsule.incoming.connection_hint,
                                     &mesh_packet,
                                     Some(cryptor.to_string()),
                                     Some(data.portnum()),
@@ -170,14 +173,12 @@ async fn handle_network_event(
                                 )
                                 .await
                                 .unwrap();
-                            // router
-                            //     .route_next(Some(cryptor.to_string()), recv_capsule)
-                            //     .await;
                         } else {
                             sqlite
                                 .insert_packet(
                                     gateway,
                                     &recv_capsule.source_connection_name,
+                                    recv_capsule.incoming.connection_hint,
                                     &mesh_packet,
                                     None,
                                     None,
@@ -185,12 +186,6 @@ async fn handle_network_event(
                                 )
                                 .await
                                 .unwrap();
-                            // let channel = if mesh_packet.pki_encrypted {
-                            //     Some("PKI".into())
-                            // } else {
-                            //     None
-                            // };
-                            // router.route_next(channel, recv_capsule).await;
                         };
                     }
                 }
@@ -200,6 +195,7 @@ async fn handle_network_event(
                     .insert_packet(
                         gateway,
                         &recv_capsule.source_connection_name,
+                        recv_capsule.incoming.connection_hint,
                         &mesh_packet,
                         None,
                         None,

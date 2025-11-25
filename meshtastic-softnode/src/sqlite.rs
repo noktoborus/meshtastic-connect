@@ -1,6 +1,6 @@
 use crate::router::ConnectionName;
 use chrono::{DateTime, Utc};
-use meshtastic_connect::{keyring::node_id::NodeId, meshtastic};
+use meshtastic_connect::{keyring::node_id::NodeId, meshtastic, transport::mqtt::ConnectionHint};
 use prost::Message;
 use softnode_client::app::{
     byte_node_id::ByteNodeId,
@@ -40,6 +40,7 @@ impl SQLite {
                 port_num TEXT,
                 data BLOB,
                 connection_name TEXT,
+                connection_hint TEXT,
                 gateway TEXT,
                 sequence_number INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT
             )",
@@ -89,7 +90,7 @@ impl SQLite {
                             None
                         };
 
-                        let gateway_or_not: Option<String> = row.get(21)?;
+                        let gateway_or_not: Option<String> = row.get(22)?;
                         let gateway = if let Some(gateway) = gateway_or_not {
                             Some(NodeId::try_from(gateway).unwrap())
                         } else {
@@ -134,10 +135,11 @@ impl SQLite {
                         };
 
                         Ok(StoredMeshPacket {
-                            sequence_number: row.get(22)?,
+                            sequence_number: row.get(23)?,
                             gateway,
                             store_timestamp: row.get(0)?,
                             connection_name: row.get(20)?,
+                            connection_hint: row.get(21)?,
                             header,
                             data,
                         })
@@ -166,12 +168,14 @@ impl SQLite {
         &self,
         gateway: Option<NodeId>,
         connection_name: &ConnectionName,
+        connection_hint: Option<ConnectionHint>,
         packet: &meshtastic::MeshPacket,
         channel_name: Option<String>,
         port_num: Option<meshtastic::PortNum>,
         data: Option<&Vec<u8>>,
     ) -> tokio_rusqlite::Result<()> {
         let connection_name = connection_name.clone();
+        let connection_hint = connection_hint.clone();
         let packet = packet.clone();
         let data = if let Some(data) = data {
             Some(data.clone())
@@ -184,8 +188,8 @@ impl SQLite {
             "INSERT INTO mesh_packets (
                 'from', 'to', channel, id, rx_time, rx_snr, hop_limit, want_ack,
                 priority, rx_rssi, via_mqtt, hop_start, public_key, pki_encrypted,
-                next_hop, relay_node, channel_name, port_num, data, connection_name, gateway
-            ) VALUES (?1, ?2, ?3, ?4, DATETIME(?5, 'unixepoch'), ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                next_hop, relay_node, channel_name, port_num, data, connection_name, connection_hint, gateway
+            ) VALUES (?1, ?2, ?3, ?4, DATETIME(?5, 'unixepoch'), ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 NodeId::from(packet.from).to_string(),
                 NodeId::from(packet.to).to_string(),
@@ -207,6 +211,7 @@ impl SQLite {
                 port_num.map(|v| v.as_str_name()),
                 data,
                 connection_name,
+                connection_hint,
                 gateway.map(|v| v.to_string()),
             ],
         ))

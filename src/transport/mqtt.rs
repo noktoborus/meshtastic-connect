@@ -7,7 +7,7 @@ use std::{net::SocketAddr, time::Duration};
 pub type Topic = String;
 
 // Channel identifier (name)
-pub type ChannelId = String;
+pub type ConnectionHint = String;
 
 pub struct MqttMeta {
     gateway: NodeId,
@@ -94,7 +94,7 @@ impl MqttBuilder {
 impl MqttReceiver {
     pub async fn next(
         &mut self,
-    ) -> Result<(meshtastic::MeshPacket, ChannelId, NodeId), std::io::Error> {
+    ) -> Result<(meshtastic::MeshPacket, ConnectionHint, NodeId), std::io::Error> {
         loop {
             let event = self.event_loop.poll().await.map_err(|e| {
                 std::io::Error::new(
@@ -119,7 +119,7 @@ impl MqttReceiver {
                 })?;
 
                 if let Some(packet) = service_envelope.packet {
-                    return Ok((packet, service_envelope.channel_id, gateway_id));
+                    return Ok((packet, publish.topic, gateway_id));
                 } else {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::Other,
@@ -130,7 +130,7 @@ impl MqttReceiver {
         }
     }
 }
-type MqttSendData = (ChannelId, meshtastic::MeshPacket);
+type MqttSendData = (ConnectionHint, meshtastic::MeshPacket);
 
 impl MqttSender {
     pub async fn send(&mut self, send_data: MqttSendData) -> Result<(), std::io::Error> {
@@ -164,7 +164,7 @@ impl Mqtt {
 
     pub async fn next(
         &mut self,
-    ) -> Result<(meshtastic::MeshPacket, ChannelId, NodeId), std::io::Error> {
+    ) -> Result<(meshtastic::MeshPacket, ConnectionHint, NodeId), std::io::Error> {
         self.receiver.next().await
     }
 

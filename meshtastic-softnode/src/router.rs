@@ -43,7 +43,7 @@ impl Router {
     // Send a mesh packet to all connections except the one specified by `from`
     async fn send_mesh_except(
         &mut self,
-        channel: Option<mqtt::ChannelId>,
+        channel: Option<mqtt::ConnectionHint>,
         mesh_packet: &meshtastic_connect::meshtastic::MeshPacket,
         source_connection_id: Option<ConnectionId>,
     ) {
@@ -107,26 +107,10 @@ impl Router {
     // Send to all connections
     pub async fn send_mesh(
         &mut self,
-        channel: Option<mqtt::ChannelId>,
+        channel: Option<mqtt::ConnectionHint>,
         mesh_packet: meshtastic_connect::meshtastic::MeshPacket,
     ) {
         self.send_mesh_except(channel, &mesh_packet, None).await;
-    }
-
-    // Send to next transports' endpoint
-    pub async fn route_next(
-        &mut self,
-        channel: Option<mqtt::ChannelId>,
-        recv_capsule: ReceiveCapsule,
-    ) {
-        if let connection::DataVariant::MeshPacket(ref mesh_packet) = recv_capsule.incoming.data {
-            self.send_mesh_except(
-                channel.or(recv_capsule.incoming.channel_id),
-                &mesh_packet,
-                Some(recv_capsule.source_connection_id),
-            )
-            .await;
-        }
     }
 
     // Try to receive from all connections and send to all, except received

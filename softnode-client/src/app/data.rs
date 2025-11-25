@@ -226,6 +226,7 @@ pub struct StoredMeshPacket {
     pub store_timestamp: DateTime<chrono::Utc>,
     pub gateway: Option<NodeId>,
     pub connection_name: String,
+    pub connection_hint: Option<String>,
     pub header: StoredMeshHeader,
     pub data: Option<DataVariant>,
 }

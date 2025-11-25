@@ -12,7 +12,7 @@ use futures::StreamExt;
 use prost::Message;
 
 use super::{
-    mqtt::{ChannelId, Topic},
+    mqtt::{ConnectionHint, Topic},
     stream::{self, PacketId},
 };
 
@@ -21,7 +21,7 @@ pub enum MqttStreamRecvData {
     // MeshPacket from Radio
     MeshPacket(PacketId, meshtastic::MeshPacket),
     // MeshPacket from MQTT
-    MQTTMeshPacket(PacketId, meshtastic::MeshPacket, ChannelId, NodeId),
+    MQTTMeshPacket(PacketId, meshtastic::MeshPacket, ConnectionHint, NodeId),
     // Any FromRadio message, except MeshPacket and MqttClientProxyMessage
     FromRadio(PacketId, meshtastic::from_radio::PayloadVariant),
     // Raw, journal or other unrecognized data
@@ -30,7 +30,7 @@ pub enum MqttStreamRecvData {
 
 pub enum MqttStreamSendData {
     // MeshPacket to Radio for MQTT layer
-    MeshPacket(ChannelId, meshtastic::MeshPacket),
+    MeshPacket(ConnectionHint, meshtastic::MeshPacket),
     // ToRadio message, for Stream layer
     ToRadio(to_radio::PayloadVariant),
     // Raw bytes for Stream layer
@@ -173,7 +173,7 @@ impl futures::Stream for MqttStream {
                                             Ok(MqttStreamRecvData::MQTTMeshPacket(
                                                 packet_id,
                                                 packet,
-                                                service_envelope.channel_id,
+                                                mqtt_proxy_msg.topic,
                                                 gateway,
                                             ))
                                         } else {
