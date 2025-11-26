@@ -119,7 +119,7 @@ impl JournalPanel {
                                         } else if entry.hop_start >= entry.hop_limit {
                                             let away = entry.hop_start - entry.hop_limit;
                                             ui.small(away.to_string()).on_hover_text(format!(
-                                                "Away at {} hops (limit: {}, start: {})",
+                                                "{} hops away (limit: {}, start: {})",
                                                 away, entry.hop_limit, entry.hop_start
                                             ));
                                         } else {
