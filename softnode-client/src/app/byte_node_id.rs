@@ -26,7 +26,7 @@ impl From<NodeId> for ByteNodeId {
 
 impl fmt::Display for ByteNodeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "!~~~~~~{:02x}", self.0)
+        write!(f, "~{:02x}", self.0)
     }
 }
 
