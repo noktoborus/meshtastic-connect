@@ -20,7 +20,19 @@ impl From<u32> for ByteNodeId {
 
 impl From<NodeId> for ByteNodeId {
     fn from(node_id: NodeId) -> Self {
-        ByteNodeId(node_id.to_bytes()[3])
+        ByteNodeId(node_id.to_bytes()[0])
+    }
+}
+
+impl TryFrom<&str> for ByteNodeId {
+    type Error = std::num::ParseIntError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.len() == 3 {
+            Ok(ByteNodeId(u8::from_str_radix(&value[1..], 16)?))
+        } else {
+            Ok(ByteNodeId(u8::from_str_radix(value, 16)?))
+        }
     }
 }
 
@@ -32,6 +44,6 @@ impl fmt::Display for ByteNodeId {
 
 impl PartialEq<NodeId> for ByteNodeId {
     fn eq(&self, other: &NodeId) -> bool {
-        self.0 == other.to_bytes()[3]
+        self.0 == other.to_bytes()[0]
     }
 }

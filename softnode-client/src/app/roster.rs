@@ -1,5 +1,6 @@
 use crate::app::{
     ListPanelFilter,
+    byte_node_id::ByteNodeId,
     data::{NodeInfo, TelemetryVariant},
     settings::Settings,
     telemetry::Telemetry,
@@ -75,27 +76,46 @@ impl Roster {
         } else {
             let normalized_filter = self.filter.to_lowercase();
             let splitted_filter = normalized_filter.split_whitespace().collect::<Vec<&str>>();
+            let part_node_ids = splitted_filter
+                .iter()
+                .map(|splitted| ByteNodeId::try_from(*splitted).ok())
+                .filter(|v| v.is_some())
+                .flatten()
+                .collect::<Vec<_>>();
+
             nodes
                 .iter()
                 .filter(|node_info| {
                     let mut skip = true;
-                    for filter in &splitted_filter {
-                        if node_info.node_id.to_string().contains(filter) {
+                    for part_node_id in &part_node_ids {
+                        if *part_node_id == node_info.node_id {
                             skip = false;
                             break;
                         }
                     }
-                    if let Some(extended_info) = node_info.extended_info_history.last() {
+                    if skip {
                         for filter in &splitted_filter {
-                            if extended_info.short_name.to_lowercase().contains(filter) {
+                            if node_info.node_id.to_string().contains(filter) {
                                 skip = false;
                                 break;
                             }
                         }
-                        for filter in &splitted_filter {
-                            if extended_info.long_name.to_lowercase().contains(filter) {
-                                skip = false;
-                                break;
+                    }
+                    if let Some(extended_info) = node_info.extended_info_history.last() {
+                        if skip {
+                            for filter in &splitted_filter {
+                                if extended_info.short_name.to_lowercase().contains(filter) {
+                                    skip = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if skip {
+                            for filter in &splitted_filter {
+                                if extended_info.long_name.to_lowercase().contains(filter) {
+                                    skip = false;
+                                    break;
+                                }
                             }
                         }
                     }
