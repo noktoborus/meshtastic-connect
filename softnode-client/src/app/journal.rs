@@ -65,7 +65,7 @@ impl JournalPanel {
                         row.col(|ui| {
                             let response = ui.vertical(|ui| {
                                 ui.vertical(|ui| {
-                                    if previous_date != entry.timestamp.date_naive() {
+                                    if index == journal.len() - 1 || previous_date != entry.timestamp.date_naive() {
                                         ui.heading(entry.timestamp.format("%Y-%m-%d").to_string());
                                     }
                                     ui.horizontal(|ui| {
