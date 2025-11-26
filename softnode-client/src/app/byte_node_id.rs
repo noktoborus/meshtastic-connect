@@ -14,7 +14,7 @@ impl ByteNodeId {
 
 impl From<u32> for ByteNodeId {
     fn from(value: u32) -> Self {
-        ByteNodeId(value.to_ne_bytes()[3])
+        ByteNodeId(value.to_ne_bytes()[0])
     }
 }
 
