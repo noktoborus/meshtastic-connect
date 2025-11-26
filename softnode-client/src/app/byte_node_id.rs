@@ -6,6 +6,12 @@ use meshtastic_connect::keyring::node_id::NodeId;
 #[derive(serde::Deserialize, serde::Serialize, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ByteNodeId(u8);
 
+impl ByteNodeId {
+    pub fn zero() -> Self {
+        ByteNodeId(0)
+    }
+}
+
 impl From<u32> for ByteNodeId {
     fn from(value: u32) -> Self {
         ByteNodeId(value.to_ne_bytes()[3])

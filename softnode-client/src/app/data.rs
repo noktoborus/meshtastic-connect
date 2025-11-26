@@ -12,10 +12,13 @@ use super::byte_node_id::ByteNodeId;
 
 pub struct JournalData {
     pub timestamp: DateTime<Utc>,
+    pub hop_start: u32,
+    pub hop_limit: u32,
     pub id: u32,
     pub from: NodeId,
     pub to: NodeId,
     pub channel: u32,
+    pub via_mqtt: bool,
     pub is_pki: bool,
     pub is_encrypted: bool,
     pub gateway: Option<NodeId>,
@@ -28,7 +31,7 @@ impl From<StoredMeshPacket> for JournalData {
     fn from(stored_mesh_packet: StoredMeshPacket) -> Self {
         let message_type;
         let is_encrypted;
-        let mut message_hint;
+        let message_hint;
 
         if let Some(data) = stored_mesh_packet.data {
             match data {
@@ -109,16 +112,15 @@ impl From<StoredMeshPacket> for JournalData {
             message_hint = "".into();
         };
 
-        if stored_mesh_packet.header.pki_encrypted {
-            message_hint = format!("PKI {}", message_hint)
-        }
-
         JournalData {
             id: stored_mesh_packet.header.id,
             timestamp: stored_mesh_packet.store_timestamp,
+            hop_start: stored_mesh_packet.header.hop_start,
+            hop_limit: stored_mesh_packet.header.hop_limit,
             from: stored_mesh_packet.header.from,
             to: stored_mesh_packet.header.to,
             channel: stored_mesh_packet.header.channel,
+            via_mqtt: stored_mesh_packet.header.via_mqtt,
             is_pki: stored_mesh_packet.header.pki_encrypted,
             is_encrypted,
             gateway: stored_mesh_packet.gateway,
