@@ -225,6 +225,13 @@ fn go_download(
             let part = match part {
                 Err(err) => {
                     log::error!("Fetching error: {}", err);
+                    *state.lock() = DownloadState::Delay;
+                    let state = state.clone();
+                    let egui_ctx = egui_ctx.clone();
+                    run_after(delay_if_no_data, move || {
+                        *state.lock() = DownloadState::Idle;
+                        egui_ctx.request_repaint();
+                    });
                     return ControlFlow::Break(());
                 }
                 Ok(part) => part,
