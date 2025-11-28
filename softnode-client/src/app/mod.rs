@@ -405,12 +405,6 @@ impl SoftNodeApp {
     }
 }
 
-pub enum ListPanelFilter {
-    None,
-    Telemetry,
-    Gateway,
-}
-
 impl SoftNodeApp {
     fn update_central_panel(&mut self, ctx: &egui::Context) {
         match &mut self.persistent.active_panel {
@@ -806,13 +800,6 @@ impl eframe::App for SoftNodeApp {
             });
         });
 
-        let panel_filter = match self.persistent.active_panel {
-            Panel::Journal | Panel::Settings(_) | Panel::Rssi(_, _) => ListPanelFilter::None,
-            Panel::Telemetry(_) => ListPanelFilter::Telemetry,
-            Panel::GatewayByRSSI(_, _) | Panel::GatewayByHops(_, _) => ListPanelFilter::Gateway,
-            Panel::Map => ListPanelFilter::None,
-        };
-
         let roster = &mut self.persistent.roster;
         let hide_on_action = ctx.content_rect().width() < 400.0;
 
@@ -830,8 +817,6 @@ impl eframe::App for SoftNodeApp {
                     ui,
                     vec![map_plugin, journal_plugin],
                     nodes_list,
-                    None,
-                    panel_filter,
                     hide_on_action,
                 ) {
                     self.persistent.active_panel = next_panel;

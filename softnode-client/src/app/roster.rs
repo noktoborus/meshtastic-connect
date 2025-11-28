@@ -1,11 +1,10 @@
 use crate::app::{
-    ListPanelFilter,
     byte_node_id::ByteNodeId,
     data::{NodeInfo, TelemetryVariant},
     settings::Settings,
     telemetry::Telemetry,
 };
-use egui::{Color32, RichText, Vec2};
+use egui::{Frame, Vec2};
 use meshtastic_connect::keyring::node_id::NodeId;
 use std::collections::HashMap;
 
@@ -31,6 +30,8 @@ pub struct Roster {
     pub telemetry_enabled_for: HashMap<TelemetryVariant, Vec<NodeId>>,
     pub filter: String,
     pub offset: Vec2,
+    #[serde(skip)]
+    pub roster_heights: HashMap<NodeId, f32>,
 }
 
 #[derive(Default)]
@@ -47,12 +48,8 @@ impl Roster {
         ui: &mut egui::Ui,
         mut roster_plugins: Vec<Box<dyn Plugin + 'a>>,
         nodes: Vec<&NodeInfo>,
-        node_selected: Option<NodeId>,
-        filter_by: ListPanelFilter,
         hide_on_action: bool,
     ) -> Option<Panel> {
-        let mut next_page = None;
-
         ui.horizontal(|ui| {
             egui::TextEdit::singleline(&mut self.filter)
                 .desired_width(f32::INFINITY)
@@ -66,7 +63,6 @@ impl Roster {
             })
         });
 
-        let rows_size = 40.0;
         for roster_plugin in roster_plugins.iter_mut() {
             roster_plugin.panel_header_ui(ui);
         }
@@ -132,154 +128,169 @@ impl Roster {
         } else {
             scroll_area
         };
-        let scroll_area_output =
-            scroll_area.show_rows(ui, rows_size, filtered_nodes.len(), |ui, row_range| {
-                for node_info in &filtered_nodes[row_range.start..row_range.end] {
-                    let mut show_and_filter_by_telemetry = false;
-                    match filter_by {
-                        ListPanelFilter::None => {}
-                        ListPanelFilter::Telemetry => {
-                            show_and_filter_by_telemetry = true;
-                        }
-                        ListPanelFilter::Gateway => {
-                            if node_info.gateway_for.is_empty() {
-                                continue;
-                            }
-                        }
-                    }
 
-                    let telemetry_variants = show_and_filter_by_telemetry.then(|| {
-                        node_info
-                            .telemetry
-                            .iter()
-                            .map(|(k, v)| (k, v.len()))
-                            .filter(|(_, v)| *v > 1)
-                            .map(|(k, _)| k)
-                            .collect::<Vec<_>>()
-                    });
-                    if let Some(ref telemetry_variants) = telemetry_variants {
-                        if telemetry_variants.is_empty() {
-                            continue;
-                        }
-                    }
-                    ui.separator();
+        let mut next_page = None;
+        let mut y_offset = 0.0;
+        let scroll_area_output = scroll_area.show_viewport(ui, |ui, viewport| {
+            const DEFAULT_HEIGHT: f32 = 20.0;
 
-                    if let Some(extended) = node_info.extended_info_history.last() {
-                        let node_id_str = node_info.node_id.to_string();
-                        ui.horizontal(|ui| {
-                            if node_selected
-                                .map(|v| v == node_info.node_id)
-                                .unwrap_or(false)
-                            {
-                                ui.heading(
-                                    RichText::new("➧").color(Color32::from_rgb(0, 153, 255)),
-                                );
-                            }
-                            if node_id_str.ends_with(extended.short_name.as_str()) {
-                                ui.heading(node_id_str);
-                            } else {
-                                ui.heading(format!("{} {}", node_id_str, extended.short_name));
-                            }
-                        });
-                        if extended.long_name.len() > 0 {
-                            ui.label(extended.long_name.clone());
-                        }
-                    } else {
-                        ui.heading(node_info.node_id.to_string());
-                    }
-                    ui.add_space(5.0);
-                    ui.horizontal(|ui| {
-                        if !node_info.packet_statistics.is_empty() {
-                            if ui.button("RSSI").clicked() {
-                                if hide_on_action {
-                                    self.show = false;
-                                }
-                                next_page =
-                                    Some(Panel::Rssi(node_info.node_id, Default::default()));
-                            }
-                        }
+            for (index, node_info) in filtered_nodes.iter().enumerate() {
+                let probably_height = *self
+                    .roster_heights
+                    .get(&node_info.node_id)
+                    .unwrap_or(&DEFAULT_HEIGHT);
 
-                        if !node_info.gateway_for.is_empty() {
-                            ui.menu_button(
-                                format!("Gateway {}", node_info.gateway_for.len()),
-                                |ui| {
-                                    if ui.button("by RSSI").clicked() {
-                                        if hide_on_action {
-                                            self.show = false;
-                                        }
-                                        next_page = Some(Panel::GatewayByRSSI(
-                                            node_info.node_id,
-                                            Default::default(),
-                                        ))
-                                    }
-                                    if ui.button("by Hops").clicked() {
-                                        if hide_on_action {
-                                            self.show = false;
-                                        }
-                                        next_page = Some(Panel::GatewayByHops(
-                                            node_info.node_id,
-                                            Default::default(),
-                                        ))
-                                    }
-                                },
-                            );
-                        }
-                    });
-                    for roster_plugin in roster_plugins.iter_mut() {
-                        match roster_plugin.panel_node_ui(ui, node_info) {
-                            PanelCommand::Nothing => {}
-                            // PanelCommand::HideRoster => {
-                            //     self.show = false;
-                            //     ui.ctx().request_repaint();
-                            //     return;
-                            // }
-                            PanelCommand::NextPanel(panel) => {
-                                if hide_on_action {
-                                    self.show = false;
-                                }
-                                next_page = Some(panel);
-                                ui.ctx().request_repaint();
-                                return;
-                            }
-                        }
-                        ui.add_space(5.0);
-                    }
-
-                    if let Some(telemetry_variants) = telemetry_variants {
-                        for telemetry_variant in telemetry_variants {
-                            let position = self
-                                .telemetry_enabled_for
-                                .get(telemetry_variant)
-                                .map(|v| v.iter().position(|v| v == &node_info.node_id))
-                                .unwrap_or(None);
-                            let mut enabled = position.is_some();
-
-                            ui.checkbox(&mut enabled, telemetry_variant.to_string());
-
-                            if enabled && position.is_none() {
-                                self.telemetry_enabled_for
-                                    .entry(*telemetry_variant)
-                                    .or_insert(Default::default())
-                                    .push(node_info.node_id);
-                            } else if !enabled {
-                                if let Some(position) = position {
-                                    self.telemetry_enabled_for
-                                        .entry(*telemetry_variant)
-                                        .and_modify(|v| {
-                                            v.swap_remove(position);
-                                        });
-                                }
-                            }
-                        }
-                    }
-                    ui.add_space(10.0);
+                if y_offset + probably_height < viewport.top() {
+                    y_offset += probably_height;
+                    ui.add_space(probably_height);
+                    continue;
                 }
-            });
+
+                if y_offset > viewport.bottom() {
+                    ui.add_space((filtered_nodes.len() - index) as f32 * DEFAULT_HEIGHT);
+                    continue;
+                }
+
+                let (panel_command, height) = self.node_ui(ui, node_info, &mut roster_plugins);
+                match panel_command {
+                    PanelCommand::Nothing => {
+                        self.roster_heights
+                            .entry(node_info.node_id)
+                            .and_modify(|v| *v = height)
+                            .or_insert(height);
+                        y_offset += height;
+                    }
+                    PanelCommand::NextPanel(panel) => {
+                        next_page = Some(panel);
+                        if hide_on_action {
+                            self.show = false;
+                        }
+                        ui.ctx().request_repaint();
+                        break;
+                    }
+                }
+            }
+        });
 
         if self.filter.is_empty() {
             self.offset = scroll_area_output.state.offset;
         }
-
         next_page
+    }
+
+    fn node_ui<'a>(
+        &mut self,
+        ui: &mut egui::Ui,
+        node_info: &NodeInfo,
+        roster_plugins: &mut Vec<Box<dyn Plugin + 'a>>,
+    ) -> (PanelCommand, f32) {
+        let telemetry_variants = node_info
+            .telemetry
+            .iter()
+            .map(|(k, v)| (k, v.len()))
+            .filter(|(_, v)| *v > 1)
+            .map(|(k, _)| k)
+            .collect::<Vec<_>>();
+
+        let show_node_info = |ui: &mut egui::Ui| -> PanelCommand {
+            let mut panel_command = PanelCommand::Nothing;
+            if let Some(extended) = node_info.extended_info_history.last() {
+                let node_id_str = node_info.node_id.to_string();
+                ui.horizontal(|ui| {
+                    if node_id_str.ends_with(extended.short_name.as_str()) {
+                        ui.heading(node_id_str);
+                    } else {
+                        ui.heading(format!("{} {}", node_id_str, extended.short_name));
+                    }
+                });
+                if extended.long_name.len() > 0 {
+                    ui.label(extended.long_name.clone());
+                }
+            } else {
+                ui.heading(node_info.node_id.to_string());
+            }
+            ui.add_space(5.0);
+            ui.horizontal(|ui| {
+                if !node_info.packet_statistics.is_empty() {
+                    if ui.button("RSSI").clicked() {
+                        panel_command = PanelCommand::NextPanel(Panel::Rssi(
+                            node_info.node_id,
+                            Default::default(),
+                        ));
+                        return;
+                    }
+                }
+
+                if !node_info.gateway_for.is_empty() {
+                    ui.menu_button(format!("Gateway {}", node_info.gateway_for.len()), |ui| {
+                        if ui.button("by RSSI").clicked() {
+                            panel_command = PanelCommand::NextPanel(Panel::GatewayByRSSI(
+                                node_info.node_id,
+                                Default::default(),
+                            ));
+                            return;
+                        }
+                        if ui.button("by Hops").clicked() {
+                            panel_command = PanelCommand::NextPanel(Panel::GatewayByHops(
+                                node_info.node_id,
+                                Default::default(),
+                            ));
+                            return;
+                        }
+                    });
+                }
+            });
+            panel_command
+        };
+        let show_plugins = |ui: &mut egui::Ui| -> PanelCommand {
+            for roster_plugin in roster_plugins.iter_mut() {
+                let probably_panel_command = roster_plugin.panel_node_ui(ui, node_info);
+                if !matches!(probably_panel_command, PanelCommand::Nothing) {
+                    return probably_panel_command;
+                }
+                ui.add_space(5.0);
+            }
+
+            for telemetry_variant in telemetry_variants {
+                let position = self
+                    .telemetry_enabled_for
+                    .get(telemetry_variant)
+                    .map(|v| v.iter().position(|v| v == &node_info.node_id))
+                    .unwrap_or(None);
+                let mut enabled = position.is_some();
+
+                ui.checkbox(&mut enabled, telemetry_variant.to_string());
+
+                if enabled && position.is_none() {
+                    self.telemetry_enabled_for
+                        .entry(*telemetry_variant)
+                        .or_insert(Default::default())
+                        .push(node_info.node_id);
+                } else if !enabled {
+                    if let Some(position) = position {
+                        self.telemetry_enabled_for
+                            .entry(*telemetry_variant)
+                            .and_modify(|v| {
+                                v.swap_remove(position);
+                            });
+                    }
+                }
+            }
+            PanelCommand::Nothing
+        };
+
+        let mut panel_command = PanelCommand::Nothing;
+        let height = Frame::group(ui.style())
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                panel_command = show_node_info(ui);
+                if matches!(panel_command, PanelCommand::Nothing) {
+                    panel_command = show_plugins(ui);
+                }
+            })
+            .response
+            .rect
+            .height();
+        (panel_command, height)
     }
 }
