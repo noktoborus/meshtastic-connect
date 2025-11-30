@@ -1,6 +1,7 @@
 use crate::app::{
     byte_node_id::ByteNodeId,
     data::{NodeInfo, TelemetryVariant},
+    radio_telemetry::RadioTelemetry,
     settings::Settings,
     telemetry::Telemetry,
 };
@@ -13,9 +14,9 @@ pub enum Panel {
     Journal,
     Telemetry(Telemetry),
     Settings(Settings),
-    Rssi(NodeId, Telemetry),
-    GatewayByRSSI(NodeId, Telemetry),
-    GatewayByHops(NodeId, Telemetry),
+    Rssi(NodeId, RadioTelemetry),
+    GatewayByRSSI(NodeId, RadioTelemetry),
+    GatewayByHops(NodeId, RadioTelemetry),
     Map,
 }
 
@@ -187,7 +188,7 @@ impl Roster {
         let telemetry_variants = node_info
             .telemetry
             .iter()
-            .map(|(k, v)| (k, v.len()))
+            .map(|(k, v)| (k, v.values.len()))
             .filter(|(_, v)| *v > 1)
             .map(|(k, _)| k)
             .collect::<Vec<_>>();

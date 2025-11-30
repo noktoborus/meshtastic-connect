@@ -1,9 +1,9 @@
 use chrono::{DateTime, NaiveTime, Utc};
-use egui::{Color32, epaint::Hsva};
-use egui_plot::PlotItem;
-use std::time::Duration;
+use egui::{Align2, Color32, RichText, Style, TextStyle, epaint::Hsva};
+use egui_plot::{HLine, Line, PlotItem, PlotUi, Points, Text};
+use std::{sync::Arc, time::Duration};
 
-use super::data::NodeTelemetry;
+use crate::app::data::{NodeTelemetry, TelemetryValue};
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Telemetry {}
@@ -21,6 +21,50 @@ impl ColorGenerator {
         let h = i as f32 * golden_ratio;
         Hsva::new(h, 0.85, 0.5, 1.0).into() // TODO(emilk): OkLab or some other perspective color space
     }
+}
+
+fn plot_value_is_printable(_plot_ui: &PlotUi<'_>) -> Option<TextStyle> {
+    // let bounds = plot_ui.plot_bounds();
+    // let visible_width = bounds.max()[0] - bounds.min()[0];
+    // let visible_height = bounds.max()[1] - bounds.min()[1];
+
+    // const ZOOM_THRESHOLD: f64 = 500.0;
+    // const ZOOM_SMALL_THRESHOLD: f64 = 1200.0;
+
+    // if visible_width < ZOOM_THRESHOLD && visible_height < ZOOM_THRESHOLD {
+    Some(TextStyle::Body)
+    // } else if visible_width < ZOOM_SMALL_THRESHOLD && visible_height < ZOOM_SMALL_THRESHOLD {
+    //     Some(TextStyle::Small)
+    // } else {
+    //     None
+    // }
+}
+
+fn plot_value(
+    text_value_style: TextStyle,
+    style: &Arc<Style>,
+    name: &str,
+    color: Color32,
+    plot_ui: &mut PlotUi<'_>,
+    value: &TelemetryValue,
+    anchor: Align2,
+    basetime: DateTime<Utc>,
+) {
+    let point = [
+        ((value.timestamp.timestamp() - basetime.timestamp()) / 60) as f64,
+        value.value,
+    ];
+
+    let title = format!("{:.2}", point[1]);
+
+    let text_widget = RichText::new(title)
+        .text_style(text_value_style)
+        .background_color(style.visuals.extreme_bg_color.gamma_multiply(0.5));
+    let text = Text::new(name, point.into(), text_widget)
+        .color(color)
+        .anchor(anchor);
+
+    plot_ui.text(text);
 }
 
 impl Telemetry {
@@ -73,10 +117,7 @@ impl Telemetry {
         &mut self,
         ui: &mut egui::Ui,
         start_time: DateTime<Utc>,
-        telemetry: Vec<(String, &Vec<NodeTelemetry>)>,
-        title: Option<String>,
-        draw_line: bool,
-        stem_base: Option<f32>,
+        telemetry: Vec<(String, &NodeTelemetry)>,
     ) {
         let mut color_generator: ColorGenerator = Default::default();
         let basetime = self.base_datetime(start_time);
@@ -94,46 +135,125 @@ impl Telemetry {
             .position(egui_plot::Corner::LeftTop)
             .follow_insertion_order(true);
 
-        let legend = if let Some(title) = title {
-            legend.title(title.as_str())
-        } else {
-            legend
-        };
-
         let legend_plot = egui_plot::Plot::new("telemetry_plot")
             .legend(legend)
             .custom_x_axes(x_axes)
             .x_grid_spacer(Self::x_grid)
             .label_formatter(|a, b| lf.format(a, b));
 
+        let style = ui.style().clone();
         legend_plot.show(ui, |plot_ui| {
-            // if let Some((title, node_telemetry)) = telemetry.first() {
+            let text_value_style = plot_value_is_printable(plot_ui);
             for (title, node_telemetry) in telemetry.iter() {
+                let mut min_value: Option<TelemetryValue> = None;
+                let mut max_value: Option<TelemetryValue> = None;
                 let points: Vec<[f64; 2]> = node_telemetry
+                    .values
                     .iter()
                     .map(|v| {
+                        if min_value.as_ref().map_or(true, |min| min.value > v.value) {
+                            min_value = Some(v.clone());
+                        }
+                        if max_value.as_ref().map_or(true, |max| max.value < v.value) {
+                            max_value = Some(v.clone());
+                        }
                         [
                             ((v.timestamp.timestamp() - basetime.timestamp()) / 60) as f64,
                             v.value,
                         ]
                     })
                     .collect();
-
                 let color = color_generator.next_color();
+                let plot_points = Points::new(title, points.clone()).radius(4.0).color(color);
+                if min_value != max_value {
+                    if let Some(min_value) = &min_value {
+                        plot_ui.hline(HLine::new(title, min_value.value).color(color).width(0.5));
+                        plot_value(
+                            TextStyle::Small,
+                            &style,
+                            title,
+                            color,
+                            plot_ui,
+                            &min_value,
+                            Align2::CENTER_TOP,
+                            basetime,
+                        );
+                    }
 
-                let mut plot_points = egui_plot::Points::new(title, points.clone())
-                    .radius(4.0)
-                    .color(color);
-                if let Some(average) = stem_base {
-                    plot_points = plot_points.stems(average);
+                    if let Some(max_value) = &max_value {
+                        plot_ui.hline(HLine::new(title, max_value.value).color(color).width(0.5));
+                        plot_value(
+                            TextStyle::Small,
+                            &style,
+                            title,
+                            color,
+                            plot_ui,
+                            &max_value,
+                            Align2::CENTER_BOTTOM,
+                            basetime,
+                        );
+                    }
                 }
-                if draw_line {
-                    let id = PlotItem::id(&plot_points);
-                    let color = PlotItem::color(&plot_points);
-                    plot_ui.points(plot_points);
-                    plot_ui.line(egui_plot::Line::new(title, points).id(id).color(color));
-                } else {
-                    plot_ui.points(plot_points);
+                let id = PlotItem::id(&plot_points);
+                let color = PlotItem::color(&plot_points);
+                plot_ui.points(plot_points);
+                plot_ui.line(Line::new(title, points).id(id).color(color).width(3.0));
+
+                if let Some(text_value_style) = &text_value_style {
+                    if let Some(first_value) = node_telemetry.values.first() {
+                        if Some(first_value.value) != node_telemetry.values.last().map(|v| v.value)
+                        {
+                            plot_value(
+                                text_value_style.clone(),
+                                &style,
+                                title,
+                                color,
+                                plot_ui,
+                                first_value,
+                                Align2::RIGHT_CENTER,
+                                basetime,
+                            );
+                        }
+                    }
+
+                    if node_telemetry.values.len() > 1 {
+                        for min_peaks_value in node_telemetry.min_peaks.iter() {
+                            plot_value(
+                                text_value_style.clone(),
+                                &style,
+                                title,
+                                color,
+                                plot_ui,
+                                min_peaks_value,
+                                Align2::CENTER_BOTTOM,
+                                basetime,
+                            );
+                        }
+                        for max_peaks_value in node_telemetry.max_peaks.iter() {
+                            plot_value(
+                                text_value_style.clone(),
+                                &style,
+                                title,
+                                color,
+                                plot_ui,
+                                max_peaks_value,
+                                Align2::CENTER_TOP,
+                                basetime,
+                            );
+                        }
+                    }
+                }
+                if let Some(last_value) = node_telemetry.values.last() {
+                    plot_value(
+                        TextStyle::Body,
+                        &style,
+                        title,
+                        color,
+                        plot_ui,
+                        last_value,
+                        Align2::LEFT_CENTER,
+                        basetime,
+                    );
                 }
             }
         });

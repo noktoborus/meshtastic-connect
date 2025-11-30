@@ -152,6 +152,7 @@ fn get_telemetry_label(node_info: &NodeInfo) -> String {
             .get(&variant)
             .map(|list_or_none| {
                 list_or_none
+                    .values
                     .last()
                     .map(|value| match variant {
                         TelemetryVariant::Temperature => Some(format!("{:.2} °C", value.value)),

@@ -2,6 +2,7 @@ pub mod byte_node_id;
 pub mod data;
 mod journal;
 mod map;
+mod radio_telemetry;
 pub mod settings;
 mod telemetry;
 use std::{collections::HashMap, f32, ops::ControlFlow, sync::Arc};
@@ -11,7 +12,7 @@ pub mod radio_center;
 mod roster;
 
 use chrono::{DateTime, Utc};
-use data::{JournalData, NodeInfo, NodeTelemetry, StoredMeshPacket};
+use data::{JournalData, NodeInfo, StoredMeshPacket};
 use egui::mutex::Mutex;
 use fix_gnss::FixGnssLibrary;
 use journal::JournalPanel;
@@ -20,6 +21,7 @@ use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;
 
+use crate::app::data::TelemetryValue;
 use crate::app::journal::JournalRosterPlugin;
 use crate::app::map::{MapContext, MapRosterPlugin};
 use crate::app::radio_center::assume_position;
@@ -420,7 +422,8 @@ impl SoftNodeApp {
                     .show(ctx, |ui| self.persistent.journal.ui(ui, &self.journal));
             }
             Panel::Telemetry(telemetry) => {
-                let frame = egui::Frame::default().inner_margin(0);
+                let fill_color = ctx.style().visuals.extreme_bg_color;
+                let frame = egui::Frame::default().fill(fill_color).inner_margin(0);
                 egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                     let mut telemetry_list = Vec::new();
@@ -430,11 +433,13 @@ impl SoftNodeApp {
                     {
                         for node_id in enabled_for {
                             if let Some(node_info) = self.nodes.get(node_id) {
-                                if let Some(list) = node_info.telemetry.get(telemetry_variant) {
-                                    if list.len() <= 1 {
+                                if let Some(telemetry_store) =
+                                    node_info.telemetry.get(telemetry_variant)
+                                {
+                                    if telemetry_store.values.len() <= 1 {
                                         continue;
                                     }
-                                    if let Some(first) = list.first() {
+                                    if let Some(first) = telemetry_store.values.first() {
                                         start_datetime = first.timestamp.min(start_datetime);
                                         let title = if let Some(extended) =
                                             node_info.extended_info_history.last()
@@ -446,7 +451,7 @@ impl SoftNodeApp {
                                         } else {
                                             format!("{}: {}", telemetry_variant, node_id)
                                         };
-                                        telemetry_list.push((title, list));
+                                        telemetry_list.push((title, telemetry_store));
                                     }
                                 }
                             }
@@ -454,7 +459,7 @@ impl SoftNodeApp {
                     }
 
                     if telemetry_list.len() != 0 {
-                        telemetry.ui(ui, start_datetime, telemetry_list, None, true, None)
+                        telemetry.ui(ui, start_datetime, telemetry_list)
                     } else {
                         self.persistent.roster.show = true;
                         ui.label("Select a telemetry on left panel to display");
@@ -489,7 +494,7 @@ impl SoftNodeApp {
                     let mut rssi = Vec::new();
                     let mut max_rssi = f32::MIN;
                     // let mut snr_per_gw: HashMap<NodeId, Vec<NodeTelemetry>> = Default::default();
-                    let mut rssi_per_gw: HashMap<NodeId, Vec<NodeTelemetry>> = Default::default();
+                    let mut rssi_per_gw: HashMap<NodeId, Vec<TelemetryValue>> = Default::default();
 
                     for packet_info in &node_info.packet_statistics {
                         start_datetime = packet_info.timestamp.min(start_datetime);
@@ -499,7 +504,7 @@ impl SoftNodeApp {
                             //     value: rx_info.rx_snr as f64,
                             // };
                             max_rssi = max_rssi.max(rx_info.rx_rssi as f32);
-                            let rssi_telemetry = NodeTelemetry {
+                            let rssi_telemetry = TelemetryValue {
                                 timestamp: packet_info.timestamp,
                                 value: rx_info.rx_rssi as f64,
                             };
@@ -587,7 +592,7 @@ impl SoftNodeApp {
                                 v.iter()
                                     .map(|v| {
                                         start_datetime = v.timestamp.min(start_datetime);
-                                        NodeTelemetry {
+                                        TelemetryValue {
                                             timestamp: v.timestamp,
                                             value: v
                                                 .rx_info
@@ -662,7 +667,7 @@ impl SoftNodeApp {
                                 v.iter()
                                     .map(|v| {
                                         start_datetime = v.timestamp.min(start_datetime);
-                                        NodeTelemetry {
+                                        TelemetryValue {
                                             timestamp: v.timestamp,
                                             value: if let Some(hop_distance) = v.hop_distance {
                                                 hop_distance as f64

@@ -324,10 +324,78 @@ impl Display for TelemetryVariant {
     }
 }
 
+macro_rules! push_statistic {
+    ($list:expr, $packet:expr) => {
+        if !$list.is_empty() {
+            for (i, v) in $list.iter().rev().enumerate() {
+                if v == &$packet {
+                    break;
+                }
+
+                if $packet.timestamp > v.timestamp {
+                    $list.insert($list.len() - i, $packet);
+                    break;
+                }
+            }
+        } else {
+            $list.push($packet);
+        }
+    };
+}
+
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, PartialOrd)]
-pub struct NodeTelemetry {
+pub struct TelemetryValue {
     pub timestamp: DateTime<Utc>,
     pub value: f64,
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize, PartialEq, PartialOrd)]
+pub struct NodeTelemetry {
+    pub values: Vec<TelemetryValue>,
+    pub min_peaks: Vec<TelemetryValue>,
+    pub max_peaks: Vec<TelemetryValue>,
+}
+
+impl NodeTelemetry {
+    pub fn push(&mut self, value: TelemetryValue) {
+        push_statistic!(self.values, value);
+        self.min_peaks.clear();
+        self.max_peaks.clear();
+
+        // Remove consecutive duplicate values to simplify peak detection
+        let mut compressed = Vec::new();
+        for value in &self.values {
+            if compressed
+                .last()
+                .map_or(true, |last: &TelemetryValue| last.value != value.value)
+            {
+                compressed.push(value.clone());
+            }
+        }
+
+        let delta_avg = compressed
+            .windows(2)
+            .map(|w| (w[1].value - w[0].value).abs())
+            .sum::<f64>()
+            / (self.values.len().saturating_sub(1) as f64);
+
+        // recalc min/max
+        for w in compressed.windows(3) {
+            let [prev, current, next] = w else {
+                continue;
+            };
+            let da = (current.value - prev.value).abs();
+            let db = (current.value - next.value).abs();
+            if da < delta_avg || db < delta_avg {
+                continue;
+            }
+            if current.value < prev.value && current.value < next.value {
+                self.min_peaks.push(current.clone());
+            } else if current.value > prev.value && current.value > next.value {
+                self.max_peaks.push(current.clone());
+            }
+        }
+    }
 }
 
 #[derive(serde::Deserialize, serde::Serialize, PartialEq, PartialOrd)]
@@ -415,29 +483,10 @@ pub struct NodeInfo {
     pub extended_info_history: Vec<NodeInfoExtended>,
     pub position: Vec<Position>,
     pub assumed_position: Option<walkers::Position>,
-    pub telemetry: HashMap<TelemetryVariant, Vec<NodeTelemetry>>,
+    pub telemetry: HashMap<TelemetryVariant, NodeTelemetry>,
     pub packet_statistics: Vec<NodePacket>,
     pub gateway_for: HashMap<NodeId, Vec<GatewayInfo>>,
     pub gatewayed_by: HashMap<NodeId, GatewayInfo>,
-}
-
-macro_rules! push_statistic {
-    ($list:expr, $packet:expr) => {
-        if !$list.is_empty() {
-            for (i, v) in $list.iter().rev().enumerate() {
-                if v == &$packet {
-                    break;
-                }
-
-                if $packet.timestamp > v.timestamp {
-                    $list.insert($list.len() - i, $packet);
-                    break;
-                }
-            }
-        } else {
-            $list.push($packet);
-        }
-    };
 }
 
 impl NodeInfo {
@@ -445,15 +494,11 @@ impl NodeInfo {
         &mut self,
         timestamp: DateTime<Utc>,
         telemetry_variant: TelemetryVariant,
-        telemetry: f64,
+        value: f64,
     ) {
-        let telemetry = NodeTelemetry {
-            timestamp,
-            value: telemetry,
-        };
-        let list = self.telemetry.entry(telemetry_variant).or_default();
-
-        push_statistic!(list, telemetry);
+        let telemetry = TelemetryValue { timestamp, value };
+        let telemetry_store = self.telemetry.entry(telemetry_variant).or_default();
+        telemetry_store.push(telemetry);
     }
 
     fn update_using_data(
