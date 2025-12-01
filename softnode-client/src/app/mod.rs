@@ -13,6 +13,7 @@ mod roster;
 
 use chrono::{DateTime, Utc};
 use data::{JournalData, NodeInfo, StoredMeshPacket};
+use egui::RichText;
 use egui::mutex::Mutex;
 use fix_gnss::FixGnssLibrary;
 use journal::JournalPanel;
@@ -806,6 +807,9 @@ impl eframe::App for SoftNodeApp {
                                         Panel::Settings(Settings::new(&self.keyring));
                                     self.persistent.roster.show = false;
                                 }
+
+                                let fps = (1.0 / ui.ctx().input(|i| i.stable_dt)).round();
+                                ui.label(RichText::new(fps.to_string()).small());
                             });
                         })
                     });

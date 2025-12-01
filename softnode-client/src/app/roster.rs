@@ -5,8 +5,8 @@ use crate::app::{
     settings::Settings,
     telemetry::Telemetry,
 };
-use egui::{Color32, Frame, RichText, Vec2, scroll_area::ScrollBarVisibility};
-use meshtastic_connect::keyring::node_id::{self, NodeId};
+use egui::{Color32, Frame, RichText, Stroke, Vec2, scroll_area::ScrollBarVisibility};
+use meshtastic_connect::keyring::node_id::NodeId;
 use std::collections::HashMap;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -20,7 +20,21 @@ pub enum Panel {
     Map,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Selection {
+    Primary = 10,
+    Secondary = 20,
+    None = 30,
+}
+
 pub trait Plugin {
+    fn node_is_selected(&self, _node_info: &NodeInfo) -> Selection {
+        Selection::None
+    }
+
+    fn node_is_dropped(&self, _node_info: &NodeInfo) -> bool {
+        false
+    }
     fn panel_header_ui(self: &mut Self, ui: &mut egui::Ui) -> PanelCommand;
     fn panel_node_ui(self: &mut Self, ui: &mut egui::Ui, node_info: &NodeInfo) -> PanelCommand;
 }
@@ -69,60 +83,68 @@ impl Roster {
             roster_plugin.panel_header_ui(ui);
         }
 
-        let mut filtered_nodes = if self.filter.is_empty() {
-            nodes
-        } else {
-            let normalized_filter = self.filter.to_lowercase();
-            let splitted_filter = normalized_filter.split_whitespace().collect::<Vec<&str>>();
-            let part_node_ids = splitted_filter
-                .iter()
-                .map(|splitted| ByteNodeId::try_from(*splitted).ok())
-                .filter(|v| v.is_some())
-                .flatten()
-                .collect::<Vec<_>>();
+        let normalized_filter = self.filter.to_lowercase();
+        let splitted_filter = normalized_filter.split_whitespace().collect::<Vec<&str>>();
+        let part_node_ids = splitted_filter
+            .iter()
+            .map(|splitted| ByteNodeId::try_from(*splitted).ok())
+            .filter(|v| v.is_some())
+            .flatten()
+            .collect::<Vec<_>>();
 
-            nodes
-                .iter()
-                .filter(|node_info| {
-                    let mut skip = true;
-                    for part_node_id in &part_node_ids {
-                        if *part_node_id == node_info.node_id {
-                            skip = false;
-                            break;
-                        }
+        let mut is_dropped = |node_info: &NodeInfo| -> Option<Selection> {
+            let mut selection = Selection::None;
+            for roster_plugin in roster_plugins.iter_mut() {
+                let nselection = roster_plugin.node_is_selected(node_info);
+                if nselection != Selection::None {
+                    selection = nselection;
+                }
+                if roster_plugin.node_is_dropped(node_info) {
+                    return None;
+                }
+            }
+            if normalized_filter.is_empty() {
+                return Some(selection);
+            }
+            for part_node_id in &part_node_ids {
+                if *part_node_id == node_info.node_id {
+                    return Some(selection);
+                }
+            }
+            for filter in &splitted_filter {
+                if node_info.node_id.to_string().contains(filter) {
+                    return Some(selection);
+                }
+            }
+            if let Some(extended_info) = node_info.extended_info_history.last() {
+                for filter in &splitted_filter {
+                    if extended_info.short_name.to_lowercase().contains(filter) {
+                        return Some(selection);
                     }
-                    if skip {
-                        for filter in &splitted_filter {
-                            if node_info.node_id.to_string().contains(filter) {
-                                skip = false;
-                                break;
-                            }
-                        }
+                }
+                for filter in &splitted_filter {
+                    if extended_info.long_name.to_lowercase().contains(filter) {
+                        return Some(selection);
                     }
-                    if let Some(extended_info) = node_info.extended_info_history.last() {
-                        if skip {
-                            for filter in &splitted_filter {
-                                if extended_info.short_name.to_lowercase().contains(filter) {
-                                    skip = false;
-                                    break;
-                                }
-                            }
-                        }
-                        if skip {
-                            for filter in &splitted_filter {
-                                if extended_info.long_name.to_lowercase().contains(filter) {
-                                    skip = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    !skip
-                })
-                .map(|v| *v)
-                .collect()
+                }
+            }
+            return None;
         };
-        filtered_nodes.sort_by_key(|node_info| node_info.node_id);
+
+        let mut filtered_nodes: Vec<(&NodeInfo, Selection)> = nodes
+            .iter()
+            .map(|node_info| {
+                if let Some(selection) = is_dropped(node_info) {
+                    (Some(node_info), selection)
+                } else {
+                    (None, Selection::None)
+                }
+            })
+            .filter(|(node_info_or_not, _)| node_info_or_not.is_some())
+            .map(|(node_info, selection)| (*node_info.unwrap(), selection))
+            .collect();
+        filtered_nodes.sort_by_key(|(node_info, _)| node_info.node_id);
+        filtered_nodes.sort_by_key(|(_, selection)| *selection);
 
         let scroll_area = egui::ScrollArea::vertical();
         let scroll_area = if self.filter.is_empty() {
@@ -154,7 +176,7 @@ impl Roster {
                     .rect
                     .height();
 
-                for (index, node_info) in filtered_nodes.iter().enumerate() {
+                for (index, (node_info, selection)) in filtered_nodes.iter().enumerate() {
                     let probably_height = *self
                         .roster_heights
                         .get(&node_info.node_id)
@@ -170,8 +192,8 @@ impl Roster {
                         ui.add_space((filtered_nodes.len() - index) as f32 * DEFAULT_HEIGHT);
                         continue;
                     }
-
-                    let (panel_command, height) = self.node_ui(ui, node_info, &mut roster_plugins);
+                    let (panel_command, height) =
+                        self.node_ui(ui, node_info, &mut roster_plugins, *selection);
                     match panel_command {
                         PanelCommand::Nothing => {
                             self.roster_heights
@@ -203,6 +225,7 @@ impl Roster {
         ui: &mut egui::Ui,
         node_info: &NodeInfo,
         roster_plugins: &mut Vec<Box<dyn Plugin + 'a>>,
+        selection: Selection,
     ) -> (PanelCommand, f32) {
         let telemetry_variants = node_info
             .telemetry
@@ -330,7 +353,17 @@ impl Roster {
         };
 
         let mut panel_command = PanelCommand::Nothing;
-        let height = Frame::group(ui.style())
+        let mut frame = Frame::group(ui.style());
+        match selection {
+            Selection::None => {}
+            Selection::Primary => {
+                frame = frame.stroke(Stroke::new(2.0, Color32::LIGHT_BLUE));
+            }
+            Selection::Secondary => {
+                frame = frame.stroke(Stroke::new(0.5, Color32::LIGHT_BLUE));
+            }
+        }
+        let height = frame
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 panel_command = show_node_info(ui);
