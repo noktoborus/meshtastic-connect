@@ -51,6 +51,7 @@ impl Roster {
         nodes: Vec<&NodeInfo>,
         hide_on_action: bool,
     ) -> Option<Panel> {
+        let overall_nodes = nodes.len();
         ui.horizontal(|ui| {
             egui::TextEdit::singleline(&mut self.filter)
                 .desired_width(f32::INFINITY)
@@ -136,6 +137,22 @@ impl Roster {
             .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
             .show_viewport(ui, |ui, viewport| {
                 const DEFAULT_HEIGHT: f32 = 20.0;
+
+                y_offset += Frame::new()
+                    .show(ui, |ui| {
+                        if overall_nodes != filtered_nodes.len() {
+                            ui.label(format!(
+                                "filtered nodes: {}/{}",
+                                filtered_nodes.len(),
+                                overall_nodes
+                            ));
+                        } else {
+                            ui.label(format!("nodes: {}", filtered_nodes.len()));
+                        }
+                    })
+                    .response
+                    .rect
+                    .height();
 
                 for (index, node_info) in filtered_nodes.iter().enumerate() {
                     let probably_height = *self
