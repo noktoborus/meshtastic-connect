@@ -1,12 +1,12 @@
 use crate::app::{
     byte_node_id::ByteNodeId,
-    data::{NodeInfo, TelemetryVariant},
+    data::{NodeInfo, NodeInfoExtended, TelemetryVariant},
     radio_telemetry::RadioTelemetry,
     settings::Settings,
     telemetry::Telemetry,
 };
-use egui::{Frame, Vec2};
-use meshtastic_connect::keyring::node_id::NodeId;
+use egui::{Color32, Frame, RichText, Vec2, scroll_area::ScrollBarVisibility};
+use meshtastic_connect::keyring::node_id::{self, NodeId};
 use std::collections::HashMap;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -132,46 +132,48 @@ impl Roster {
 
         let mut next_page = None;
         let mut y_offset = 0.0;
-        let scroll_area_output = scroll_area.show_viewport(ui, |ui, viewport| {
-            const DEFAULT_HEIGHT: f32 = 20.0;
+        let scroll_area_output = scroll_area
+            .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+            .show_viewport(ui, |ui, viewport| {
+                const DEFAULT_HEIGHT: f32 = 20.0;
 
-            for (index, node_info) in filtered_nodes.iter().enumerate() {
-                let probably_height = *self
-                    .roster_heights
-                    .get(&node_info.node_id)
-                    .unwrap_or(&DEFAULT_HEIGHT);
+                for (index, node_info) in filtered_nodes.iter().enumerate() {
+                    let probably_height = *self
+                        .roster_heights
+                        .get(&node_info.node_id)
+                        .unwrap_or(&DEFAULT_HEIGHT);
 
-                if y_offset + probably_height < viewport.top() {
-                    y_offset += probably_height;
-                    ui.add_space(probably_height);
-                    continue;
-                }
-
-                if y_offset > viewport.bottom() {
-                    ui.add_space((filtered_nodes.len() - index) as f32 * DEFAULT_HEIGHT);
-                    continue;
-                }
-
-                let (panel_command, height) = self.node_ui(ui, node_info, &mut roster_plugins);
-                match panel_command {
-                    PanelCommand::Nothing => {
-                        self.roster_heights
-                            .entry(node_info.node_id)
-                            .and_modify(|v| *v = height)
-                            .or_insert(height);
-                        y_offset += height;
+                    if y_offset + probably_height < viewport.top() {
+                        y_offset += probably_height;
+                        ui.add_space(probably_height);
+                        continue;
                     }
-                    PanelCommand::NextPanel(panel) => {
-                        next_page = Some(panel);
-                        if hide_on_action {
-                            self.show = false;
+
+                    if y_offset > viewport.bottom() {
+                        ui.add_space((filtered_nodes.len() - index) as f32 * DEFAULT_HEIGHT);
+                        continue;
+                    }
+
+                    let (panel_command, height) = self.node_ui(ui, node_info, &mut roster_plugins);
+                    match panel_command {
+                        PanelCommand::Nothing => {
+                            self.roster_heights
+                                .entry(node_info.node_id)
+                                .and_modify(|v| *v = height)
+                                .or_insert(height);
+                            y_offset += height;
                         }
-                        ui.ctx().request_repaint();
-                        break;
+                        PanelCommand::NextPanel(panel) => {
+                            next_page = Some(panel);
+                            if hide_on_action {
+                                self.show = false;
+                            }
+                            ui.ctx().request_repaint();
+                            break;
+                        }
                     }
                 }
-            }
-        });
+            });
 
         if self.filter.is_empty() {
             self.offset = scroll_area_output.state.offset;
@@ -193,22 +195,52 @@ impl Roster {
             .map(|(k, _)| k)
             .collect::<Vec<_>>();
 
+        let show_extended = |ui: &mut egui::Ui, extended: &NodeInfoExtended| {
+            let node_id_str = node_info.node_id.to_string();
+            ui.horizontal(|ui| {
+                if let Some(pkey) = extended.pkey {
+                    let key_size = pkey.as_bytes().len() * 8;
+                    ui.heading(RichText::new("🔒").color(Color32::LIGHT_GREEN))
+                        .on_hover_text(format!("{} bit key is announced", key_size));
+                } else {
+                    if !extended.is_licensed {
+                        ui.heading(RichText::new("🔓").color(Color32::LIGHT_RED))
+                            .on_hover_text("No key is announced");
+                    }
+                }
+                if extended.is_licensed {
+                    ui.heading(RichText::new("🖹").color(Color32::LIGHT_BLUE))
+                        .on_hover_text("Node is licensed radio:\nmeaning that node can not\nuse crypto to send messages");
+                }
+                if let Some(is_unmessagable) = extended.is_unmessagable {
+                    if is_unmessagable {
+                        ui.heading(RichText::new("🚫").color(Color32::LIGHT_RED))
+                            .on_hover_text("Node is unmessagable (infrastructure)");
+                    }
+                }
+                if node_id_str == extended.announced_node_id {
+                    ui.heading(RichText::new(node_id_str).strong())
+                        .on_hover_text(format!("Announced: {}", extended.announced_node_id));
+                }
+                else {
+                    ui.heading(RichText::new(node_id_str.clone()).strong().color(Color32::LIGHT_RED))
+                        .on_hover_text(format!("NodeID is {} but announced id is {}", node_id_str, extended.announced_node_id));
+                }
+                ui.heading(extended.short_name.clone()).on_hover_text("Node's short name");
+            });
+            if extended.long_name.len() > 0 {
+                ui.label(RichText::new(extended.long_name.clone()).strong())
+                    .on_hover_text("Node's long name");
+            }
+        };
+
         let show_node_info = |ui: &mut egui::Ui| -> PanelCommand {
             let mut panel_command = PanelCommand::Nothing;
             if let Some(extended) = node_info.extended_info_history.last() {
-                let node_id_str = node_info.node_id.to_string();
-                ui.horizontal(|ui| {
-                    if node_id_str.ends_with(extended.short_name.as_str()) {
-                        ui.heading(node_id_str);
-                    } else {
-                        ui.heading(format!("{} {}", node_id_str, extended.short_name));
-                    }
-                });
-                if extended.long_name.len() > 0 {
-                    ui.label(extended.long_name.clone());
-                }
+                show_extended(ui, extended);
             } else {
-                ui.heading(node_info.node_id.to_string());
+                ui.heading(node_info.node_id.to_string())
+                    .on_hover_text("No NodeInfo announced");
             }
             ui.add_space(5.0);
             ui.horizontal(|ui| {

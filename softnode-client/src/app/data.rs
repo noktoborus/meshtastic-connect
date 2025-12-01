@@ -435,6 +435,8 @@ pub struct NodeInfoExtended {
     pub long_name: String,
     pub short_name: String,
     pub pkey: Option<Key>,
+    pub is_licensed: bool,
+    pub is_unmessagable: Option<bool>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, PartialEq)]
@@ -569,6 +571,8 @@ impl NodeInfo {
                         long_name: user.long_name,
                         short_name: user.short_name,
                         pkey,
+                        is_licensed: user.is_licensed,
+                        is_unmessagable: user.is_unmessagable,
                     };
 
                     push_statistic!(self.extended_info_history, node_info_extended);
