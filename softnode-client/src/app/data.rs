@@ -506,46 +506,49 @@ impl NodeInfo {
         stored_timestamp: DateTime<Utc>,
         data: &meshtastic::Data,
         fix_gnss: &FixGnssLibrary,
+        is_duplicate: bool,
     ) -> Result<meshtastic::PortNum, String> {
         match data.portnum() {
             meshtastic::PortNum::PositionApp => {
                 let mesh_position = meshtastic::Position::decode(data.payload.as_slice())
                     .map_err(|e| e.to_string())?;
 
-                let altitude = if let Some(altitude) = mesh_position.altitude {
-                    altitude
-                } else if let Some(altitude) = mesh_position.altitude_hae {
-                    altitude
-                } else if let Some(altitude) = mesh_position.altitude_geoidal_separation {
-                    altitude
-                } else {
-                    0
-                };
-
-                let latitude = mesh_position.latitude_i() as f64 * 1e-7;
-                let longitude = mesh_position.longitude_i() as f64 * 1e-7;
-                let fix_gnss_query = FixGnss {
-                    latitude,
-                    longitude,
-                };
-
-                if let Some(zone_name) = fix_gnss.point_in_zone(&fix_gnss_query) {
-                    log::info!("Skip point in zone id: {:?}", zone_name);
-                } else {
-                    let position = Position {
-                        seq_number: mesh_position.seq_number,
-                        timestamp: DateTime::from_timestamp(mesh_position.timestamp as i64, 0)
-                            .unwrap_or(Default::default()),
-                        latitude,
-                        longitude,
-                        altitude,
-                        speed: mesh_position.ground_speed(),
+                if !is_duplicate {
+                    let altitude = if let Some(altitude) = mesh_position.altitude {
+                        altitude
+                    } else if let Some(altitude) = mesh_position.altitude_hae {
+                        altitude
+                    } else if let Some(altitude) = mesh_position.altitude_geoidal_separation {
+                        altitude
+                    } else {
+                        0
                     };
 
-                    if position.timestamp == DateTime::<Utc>::default() {
-                        self.position.push(position);
+                    let latitude = mesh_position.latitude_i() as f64 * 1e-7;
+                    let longitude = mesh_position.longitude_i() as f64 * 1e-7;
+                    let fix_gnss_query = FixGnss {
+                        latitude,
+                        longitude,
+                    };
+
+                    if let Some(zone_name) = fix_gnss.point_in_zone(&fix_gnss_query) {
+                        log::info!("Skip point in zone id: {:?}", zone_name);
                     } else {
-                        push_statistic!(self.position, position);
+                        let position = Position {
+                            seq_number: mesh_position.seq_number,
+                            timestamp: DateTime::from_timestamp(mesh_position.timestamp as i64, 0)
+                                .unwrap_or(Default::default()),
+                            latitude,
+                            longitude,
+                            altitude,
+                            speed: mesh_position.ground_speed(),
+                        };
+
+                        if position.timestamp == DateTime::<Utc>::default() {
+                            self.position.push(position);
+                        } else {
+                            push_statistic!(self.position, position);
+                        }
                     }
                 }
             }
@@ -559,15 +562,17 @@ impl NodeInfo {
                     None
                 };
 
-                let node_info_extended = NodeInfoExtended {
-                    timestamp: stored_timestamp,
-                    announced_node_id: user.id.clone(),
-                    long_name: user.long_name,
-                    short_name: user.short_name,
-                    pkey,
-                };
+                if !is_duplicate {
+                    let node_info_extended = NodeInfoExtended {
+                        timestamp: stored_timestamp,
+                        announced_node_id: user.id.clone(),
+                        long_name: user.long_name,
+                        short_name: user.short_name,
+                        pkey,
+                    };
 
-                push_statistic!(self.extended_info_history, node_info_extended);
+                    push_statistic!(self.extended_info_history, node_info_extended);
+                }
             }
             meshtastic::PortNum::TelemetryApp => {
                 let telemetry = meshtastic::Telemetry::decode(data.payload.as_slice())
@@ -585,135 +590,137 @@ impl NodeInfo {
                 // Received timestamp may be buggy, so use the stored timestamp
                 let timestamp = stored_timestamp;
 
-                match telemetry.variant.ok_or(format!("Telemetry is empty"))? {
-                    meshtastic::telemetry::Variant::DeviceMetrics(device_metrics) => {
-                        if let Some(air_util_tx) = device_metrics.air_util_tx {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::AirUtilTx,
-                                air_util_tx as f64,
-                            );
+                if !is_duplicate {
+                    match telemetry.variant.ok_or(format!("Telemetry is empty"))? {
+                        meshtastic::telemetry::Variant::DeviceMetrics(device_metrics) => {
+                            if let Some(air_util_tx) = device_metrics.air_util_tx {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirUtilTx,
+                                    air_util_tx as f64,
+                                );
+                            }
+                            if let Some(channel_utilization) = device_metrics.channel_utilization {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::ChannelUtilization,
+                                    channel_utilization as f64,
+                                );
+                            }
+                            if let Some(voltage) = device_metrics.voltage {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::Voltage,
+                                    voltage as f64,
+                                );
+                            }
+                            if let Some(battery_level) = device_metrics.battery_level {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::BatteryLevel,
+                                    battery_level as f64,
+                                );
+                            }
                         }
-                        if let Some(channel_utilization) = device_metrics.channel_utilization {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::ChannelUtilization,
-                                channel_utilization as f64,
-                            );
+                        meshtastic::telemetry::Variant::EnvironmentMetrics(environment_metrics) => {
+                            if let Some(barometric) = environment_metrics.barometric_pressure {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::BarometricPressure,
+                                    barometric as f64,
+                                );
+                            }
+                            if let Some(temperature) = environment_metrics.temperature {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::Temperature,
+                                    temperature as f64,
+                                );
+                            }
+                            if let Some(lux) = environment_metrics.lux {
+                                self.push_telemetry(timestamp, TelemetryVariant::Lux, lux as f64);
+                            }
+                            if let Some(iaq) = environment_metrics.iaq {
+                                self.push_telemetry(timestamp, TelemetryVariant::Iaq, iaq as f64);
+                            }
+                            if let Some(humidity) = environment_metrics.relative_humidity {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::Humidity,
+                                    humidity as f64,
+                                );
+                            }
+                            if let Some(gas_resistance) = environment_metrics.gas_resistance {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::GasResistance,
+                                    gas_resistance as f64,
+                                );
+                            }
+                            if let Some(radiation) = environment_metrics.radiation {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::Radiation,
+                                    radiation as f64,
+                                );
+                            }
                         }
-                        if let Some(voltage) = device_metrics.voltage {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::Voltage,
-                                voltage as f64,
-                            );
+                        meshtastic::telemetry::Variant::AirQualityMetrics(_air_quality_metrics) => {
+                            log::info!("Telemetry::AirQualityMetrics ignored");
                         }
-                        if let Some(battery_level) = device_metrics.battery_level {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::BatteryLevel,
-                                battery_level as f64,
-                            );
+                        meshtastic::telemetry::Variant::PowerMetrics(power_metrics) => {
+                            if let Some(current) = power_metrics.ch1_current {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::PowerMetricCurrent(1),
+                                    current as f64,
+                                );
+                            }
+                            if let Some(current) = power_metrics.ch2_current {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::PowerMetricCurrent(2),
+                                    current as f64,
+                                );
+                            }
+                            if let Some(current) = power_metrics.ch3_current {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::PowerMetricCurrent(3),
+                                    current as f64,
+                                );
+                            }
+                            if let Some(voltage) = power_metrics.ch1_voltage {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::PowerMetricVoltage(1),
+                                    voltage as f64,
+                                )
+                            }
+                            if let Some(voltage) = power_metrics.ch2_voltage {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::PowerMetricVoltage(2),
+                                    voltage as f64,
+                                );
+                            }
+                            if let Some(voltage) = power_metrics.ch3_voltage {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::PowerMetricVoltage(3),
+                                    voltage as f64,
+                                );
+                            }
                         }
-                    }
-                    meshtastic::telemetry::Variant::EnvironmentMetrics(environment_metrics) => {
-                        if let Some(barometric) = environment_metrics.barometric_pressure {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::BarometricPressure,
-                                barometric as f64,
-                            );
+                        meshtastic::telemetry::Variant::LocalStats(_local_stats) => {
+                            log::info!("Telemetry::LocalStats ignored");
                         }
-                        if let Some(temperature) = environment_metrics.temperature {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::Temperature,
-                                temperature as f64,
-                            );
+                        meshtastic::telemetry::Variant::HealthMetrics(_health_metrics) => {
+                            log::info!("Telemetry::HealthMetrics ignored");
                         }
-                        if let Some(lux) = environment_metrics.lux {
-                            self.push_telemetry(timestamp, TelemetryVariant::Lux, lux as f64);
+                        meshtastic::telemetry::Variant::HostMetrics(_host_metrics) => {
+                            log::info!("Telemetry::HostMetrics ignored");
                         }
-                        if let Some(iaq) = environment_metrics.iaq {
-                            self.push_telemetry(timestamp, TelemetryVariant::Iaq, iaq as f64);
-                        }
-                        if let Some(humidity) = environment_metrics.relative_humidity {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::Humidity,
-                                humidity as f64,
-                            );
-                        }
-                        if let Some(gas_resistance) = environment_metrics.gas_resistance {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::GasResistance,
-                                gas_resistance as f64,
-                            );
-                        }
-                        if let Some(radiation) = environment_metrics.radiation {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::Radiation,
-                                radiation as f64,
-                            );
-                        }
-                    }
-                    meshtastic::telemetry::Variant::AirQualityMetrics(_air_quality_metrics) => {
-                        log::info!("Telemetry::AirQualityMetrics ignored");
-                    }
-                    meshtastic::telemetry::Variant::PowerMetrics(power_metrics) => {
-                        if let Some(current) = power_metrics.ch1_current {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::PowerMetricCurrent(1),
-                                current as f64,
-                            );
-                        }
-                        if let Some(current) = power_metrics.ch2_current {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::PowerMetricCurrent(2),
-                                current as f64,
-                            );
-                        }
-                        if let Some(current) = power_metrics.ch3_current {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::PowerMetricCurrent(3),
-                                current as f64,
-                            );
-                        }
-                        if let Some(voltage) = power_metrics.ch1_voltage {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::PowerMetricVoltage(1),
-                                voltage as f64,
-                            )
-                        }
-                        if let Some(voltage) = power_metrics.ch2_voltage {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::PowerMetricVoltage(2),
-                                voltage as f64,
-                            );
-                        }
-                        if let Some(voltage) = power_metrics.ch3_voltage {
-                            self.push_telemetry(
-                                timestamp,
-                                TelemetryVariant::PowerMetricVoltage(3),
-                                voltage as f64,
-                            );
-                        }
-                    }
-                    meshtastic::telemetry::Variant::LocalStats(_local_stats) => {
-                        log::info!("Telemetry::LocalStats ignored");
-                    }
-                    meshtastic::telemetry::Variant::HealthMetrics(_health_metrics) => {
-                        log::info!("Telemetry::HealthMetrics ignored");
-                    }
-                    meshtastic::telemetry::Variant::HostMetrics(_host_metrics) => {
-                        log::info!("Telemetry::HostMetrics ignored");
                     }
                 }
             }
@@ -737,13 +744,18 @@ impl NodeInfo {
 
     pub fn update(&mut self, stored_mesh_packet: &StoredMeshPacket, fix_gnss: &FixGnssLibrary) {
         let timestamp = stored_mesh_packet.store_timestamp;
+        let is_duplicate = self
+            .packet_statistics
+            .iter()
+            .find(|v| v.packet_id == stored_mesh_packet.header.id)
+            .is_some();
         // TODO: move to perday_telemetry
         // self.push_telemetry(timestamp, TelemetryVariant::MeshPacket, 1);
         let packet_type = if let Some(data) = &stored_mesh_packet.data {
             match data {
                 DataVariant::Encrypted(_) => NodePacketType::CannotDecrypt,
                 DataVariant::Decrypted(_, data) => {
-                    match self.update_using_data(timestamp, data, fix_gnss) {
+                    match self.update_using_data(timestamp, data, fix_gnss, is_duplicate) {
                         Ok(portnum) => NodePacketType::Normal(format!("{}", portnum.as_str_name())),
                         Err(e) => {
                             log::error!("Failed to update using data: {}", e);
