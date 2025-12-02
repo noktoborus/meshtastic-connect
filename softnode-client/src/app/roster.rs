@@ -235,9 +235,22 @@ impl Roster {
             .map(|(k, _)| k)
             .collect::<Vec<_>>();
 
-        let show_extended = |ui: &mut egui::Ui, extended: &NodeInfoExtended| {
+        let show_extended = |ui: &mut egui::Ui, extended: &NodeInfoExtended, is_via_mqtt: bool| {
             let node_id_str = node_info.node_id.to_string();
             ui.horizontal(|ui| {
+                ui.heading(extended.short_name.clone())
+                    .on_hover_text("Node's short name");
+
+                if extended.long_name.len() > 0 {
+                    ui.heading(RichText::new(extended.long_name.clone()).strong())
+                        .on_hover_text("Node's long name");
+                }
+            });
+            ui.horizontal(|ui| {
+                if is_via_mqtt {
+                    ui.heading(RichText::new("").color(Color32::LIGHT_GRAY))
+                        .on_hover_text("Some packets hearrd via MQTT");
+                }
                 if let Some(pkey) = extended.pkey {
                     let key_size = pkey.as_bytes().len() * 8;
                     ui.heading(RichText::new("🔒").color(Color32::LIGHT_GREEN))
@@ -259,29 +272,34 @@ impl Roster {
                     }
                 }
                 if node_id_str == extended.announced_node_id {
-                    ui.heading(RichText::new(node_id_str).strong())
+                    ui.heading(RichText::new(node_id_str))
                         .on_hover_text(format!("Announced: {}", extended.announced_node_id));
                 }
                 else {
-                    ui.heading(RichText::new(node_id_str.clone()).strong().color(Color32::LIGHT_RED))
+                    ui.heading(RichText::new(node_id_str.clone()).color(Color32::LIGHT_RED))
                         .on_hover_text(format!("NodeID is {} but announced id is {}", node_id_str, extended.announced_node_id));
                 }
-                ui.heading(extended.short_name.clone()).on_hover_text("Node's short name");
             });
-            if extended.long_name.len() > 0 {
-                ui.label(RichText::new(extended.long_name.clone()).strong())
-                    .on_hover_text("Node's long name");
-            }
         };
 
         let show_node_info = |ui: &mut egui::Ui| -> PanelCommand {
             let mut panel_command = PanelCommand::Nothing;
-            if let Some(extended) = node_info.extended_info_history.last() {
-                show_extended(ui, extended);
-            } else {
-                ui.heading(node_info.node_id.to_string())
-                    .on_hover_text("No NodeInfo announced");
-            }
+            let via_mqtt = node_info
+                .packet_statistics
+                .iter()
+                .any(|node_packet| node_packet.via_mqtt);
+            ui.vertical(|ui| {
+                if let Some(extended) = node_info.extended_info_history.last() {
+                    show_extended(ui, extended, via_mqtt);
+                } else {
+                    if via_mqtt {
+                        ui.heading(RichText::new("").color(Color32::LIGHT_GRAY))
+                            .on_hover_text("Some packets hearrd via MQTT");
+                    }
+                    ui.heading(node_info.node_id.to_string())
+                        .on_hover_text("No NodeInfo announced");
+                }
+            });
             ui.add_space(5.0);
             ui.horizontal(|ui| {
                 if !node_info.packet_statistics.is_empty() {

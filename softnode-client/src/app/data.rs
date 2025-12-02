@@ -426,6 +426,8 @@ pub struct NodePacket {
     pub gateway: Option<NodeId>,
     pub packet_id: u32,
     pub hop_limit: u32,
+    pub via_mqtt: bool,
+    pub is_duplicate: bool,
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize, PartialEq)]
@@ -796,6 +798,8 @@ impl NodeInfo {
             gateway: stored_mesh_packet.gateway,
             packet_id: stored_mesh_packet.header.id,
             hop_limit: stored_mesh_packet.header.hop_limit,
+            via_mqtt: stored_mesh_packet.header.via_mqtt,
+            is_duplicate,
         };
 
         push_statistic!(self.packet_statistics, packet);
