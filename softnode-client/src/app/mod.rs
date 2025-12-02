@@ -579,6 +579,77 @@ impl SoftNodeApp {
                     });
                 }
             }
+            Panel::Hops(node_id, telemetry) => {
+                let mut start_datetime = DateTime::<Utc>::MAX_UTC;
+                let mut telemetry_list = Vec::new();
+
+                if let Some(node_info) = &self.nodes.get(&node_id) {
+                    let mut hops = Vec::new();
+                    let mut hops_per_gw: HashMap<NodeId, Vec<TelemetryValue>> = Default::default();
+
+                    for packet_info in &node_info.packet_statistics {
+                        start_datetime = packet_info.timestamp.min(start_datetime);
+                        let distance = packet_info
+                            .hop_distance
+                            .map(|v| v as f64)
+                            .unwrap_or(-(packet_info.hop_limit as f64));
+                        let hop_telemetry = TelemetryValue {
+                            timestamp: packet_info.timestamp,
+                            value: distance,
+                        };
+
+                        if let Some(gateway) = packet_info.gateway {
+                            hops_per_gw.entry(gateway).or_default().push(hop_telemetry);
+                        } else {
+                            hops.push(hop_telemetry);
+                        }
+                    }
+
+                    let mut hops_per_gw_sorted: Vec<_> = hops_per_gw.iter().collect();
+                    hops_per_gw_sorted.sort_by_key(|(k, _)| **k);
+
+                    for (gateway_id, list) in &hops_per_gw_sorted {
+                        let title = if let Some(gateway_extended_info) = self
+                            .nodes
+                            .get(gateway_id)
+                            .map(|v| v.extended_info_history.last())
+                            .flatten()
+                        {
+                            format!("{} {}", gateway_id, gateway_extended_info.short_name)
+                        } else {
+                            format!("{}", gateway_id)
+                        };
+                        telemetry_list.push((title, *list));
+                    }
+
+                    // telemetry_list.push((format!("SNR <unknown gateway>"), &snr));
+                    telemetry_list.push((format!("<unknown gateway>"), &hops));
+
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let title =
+                            if let Some(extended_info) = node_info.extended_info_history.last() {
+                                format!(
+                                    "{} {}\nHops away/hop limit per gateways",
+                                    node_id, extended_info.short_name
+                                )
+                            } else {
+                                format!("{}\nHops away/hop limit per gateways", node_id)
+                            };
+                        if telemetry_list.len() != 0 {
+                            telemetry.ui(
+                                ui,
+                                start_datetime,
+                                telemetry_list,
+                                Some(title),
+                                false,
+                                None,
+                            )
+                        } else {
+                            ui.label("No data");
+                        }
+                    });
+                }
+            }
             Panel::GatewayByRSSI(gateway_id, telemetry) => {
                 if let Some(gateway_info) = self.nodes.get(gateway_id) {
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
@@ -759,7 +830,10 @@ impl eframe::App for SoftNodeApp {
                                 Panel::Telemetry(_) => "Telemetry".into(),
                                 Panel::Settings(_) => "Settings".into(),
                                 Panel::Rssi(node_id, _) => {
-                                    format!("Outcome radio {}", node_id)
+                                    format!("Heard by RSSI {}", node_id)
+                                }
+                                Panel::Hops(node_id, _) => {
+                                    format!("Hops away {}", node_id)
                                 }
                                 Panel::GatewayByRSSI(node_id, _) => {
                                     format!("Income RSSI ({})", node_id)

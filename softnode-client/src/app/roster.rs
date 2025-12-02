@@ -15,6 +15,7 @@ pub enum Panel {
     Telemetry(Telemetry),
     Settings(Settings),
     Rssi(NodeId, RadioTelemetry),
+    Hops(NodeId, RadioTelemetry),
     GatewayByRSSI(NodeId, RadioTelemetry),
     GatewayByHops(NodeId, RadioTelemetry),
     Map,
@@ -303,13 +304,22 @@ impl Roster {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
                 if !node_info.packet_statistics.is_empty() {
-                    if ui.button("RSSI").clicked() {
-                        panel_command = PanelCommand::NextPanel(Panel::Rssi(
-                            node_info.node_id,
-                            Default::default(),
-                        ));
-                        return;
-                    }
+                    ui.menu_button(format!("Heard {}", node_info.gatewayed_by.len()), |ui| {
+                        if ui.button("by RSSI").clicked() {
+                            panel_command = PanelCommand::NextPanel(Panel::Rssi(
+                                node_info.node_id,
+                                Default::default(),
+                            ));
+                            return;
+                        }
+                        if ui.button("by Hops").clicked() {
+                            panel_command = PanelCommand::NextPanel(Panel::Hops(
+                                node_info.node_id,
+                                Default::default(),
+                            ));
+                            return;
+                        }
+                    });
                 }
 
                 if !node_info.gateway_for.is_empty() {

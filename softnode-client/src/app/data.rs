@@ -426,6 +426,7 @@ pub struct NodePacket {
     pub gateway: Option<NodeId>,
     pub packet_id: u32,
     pub hop_limit: u32,
+    pub hop_distance: Option<u32>,
     pub via_mqtt: bool,
     pub is_duplicate: bool,
 }
@@ -789,6 +790,13 @@ impl NodeInfo {
             }
         }
 
+        let hop_distance =
+            if stored_mesh_packet.header.hop_start >= stored_mesh_packet.header.hop_limit {
+                Some(stored_mesh_packet.header.hop_start - stored_mesh_packet.header.hop_limit)
+            } else {
+                None
+            };
+
         let packet = NodePacket {
             timestamp,
             packet_type,
@@ -798,6 +806,7 @@ impl NodeInfo {
             gateway: stored_mesh_packet.gateway,
             packet_id: stored_mesh_packet.header.id,
             hop_limit: stored_mesh_packet.header.hop_limit,
+            hop_distance,
             via_mqtt: stored_mesh_packet.header.via_mqtt,
             is_duplicate,
         };
