@@ -65,7 +65,13 @@ impl TryFrom<&str> for NodeId {
             return Ok(NodeId::broadcast());
         }
 
-        let hex_part = s.strip_prefix('!').map_or(s, |v| v);
+        let hex_part = if s.starts_with("!0x") {
+            s.strip_prefix("!0x")
+        } else {
+            s.strip_prefix("!")
+        }
+        .map_or(s, |v| v);
+
         let value = u32::from_str_radix(hex_part, 16)?;
         Ok(NodeId(value))
     }
