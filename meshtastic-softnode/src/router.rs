@@ -87,8 +87,13 @@ pub struct ReceiveCapsule {
     pub incoming: connection::Incoming,
 }
 
-type RecvSet =
-    JoinSet<Result<(ConnectionId, connection::Incoming, connection::Receiver), std::io::Error>>;
+type RecvSetResult = (
+    ConnectionId,
+    Result<connection::Incoming, std::io::Error>,
+    connection::Receiver,
+);
+
+type RecvSet = JoinSet<RecvSetResult>;
 
 type InterruptSet = JoinSet<(ConnectionId, connection::Heartbeat)>;
 
@@ -168,10 +173,7 @@ impl Router {
 
     async fn process_join_recv(
         &mut self,
-        res: Result<
-            Result<(ConnectionId, connection::Incoming, connection::Receiver), std::io::Error>,
-            tokio::task::JoinError,
-        >,
+        res: Result<RecvSetResult, tokio::task::JoinError>,
     ) -> Result<ReceiveCapsule, std::io::Error> {
         let res = res.map_err(|e| {
             std::io::Error::new(
@@ -180,15 +182,15 @@ impl Router {
             )
         })?;
 
-        let (capsule_id, mut incoming, recv) = res?;
+        let (capsule_id, incoming, recv) = res;
         let capsule = &self.connections[capsule_id];
+        set_wait_data(&mut self.recv_set, recv, capsule_id);
+        let mut incoming = incoming?;
 
         if let connection::DataVariant::MeshPacket(ref mut mesh_packet) = incoming.data {
             println!("> {:?} received: {:?}", capsule.name, mesh_packet);
             apply_quirk_to_packet(mesh_packet, &capsule.quirks.input);
         }
-
-        set_wait_data(&mut self.recv_set, recv, capsule_id);
 
         return Ok(ReceiveCapsule {
             source_connection_name: capsule.name.clone(),
@@ -199,7 +201,7 @@ impl Router {
 }
 
 fn set_wait_data(recv_set: &mut RecvSet, mut recv: connection::Receiver, id: ConnectionId) {
-    recv_set.spawn(async move { recv.next().await.map(|r| (id, r, recv)) });
+    recv_set.spawn(async move { (id, recv.next().await, recv) });
 }
 
 fn set_wait_interrupt(

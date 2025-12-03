@@ -108,7 +108,7 @@ impl MqttReceiver {
                     .map_err(|e| {
                         std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
-                            format!("Decode error: {:?}", e),
+                            format!("Decode error on {:?}: {:?}", publish, e),
                         )
                     })?;
                 let gateway_id =

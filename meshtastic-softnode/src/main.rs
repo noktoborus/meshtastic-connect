@@ -18,6 +18,7 @@ use meshtastic_connect::{
 use prost::Message;
 use publish::Publishable;
 use rand::Rng;
+use std::io::{Error, ErrorKind};
 use std::{
     process::{self, exit},
     time::Duration,
@@ -261,9 +262,20 @@ async fn main() {
             transport.name.clone(),
             transport.quirks.clone(),
             soft_node.default_channel.clone(),
+            // TODO: move connection building to router
+            // to reconnect if connection is lost
             connection::build(transport.clone(), &soft_node).await,
         );
     }
+
+    let handle_error = |err: Error| {
+        if err.kind() == ErrorKind::InvalidData {
+            println!("Invalid data received: {}", err);
+        } else {
+            println!("exit on error {:?}: {}", err.kind(), err);
+            exit(1);
+        }
+    };
 
     loop {
         let next_wakeup = schedule.next_wakeup().unwrap_or_else(|| {
@@ -277,10 +289,7 @@ async fn main() {
             result = router.recv_mesh() => {
                 match result {
                     Ok(recv_capsule) => { handle_network_event(&sqlite, &keyring, &mut router, recv_capsule).await; }
-                    Err(err) => {
-                        println!("handle error: {}", err);
-                        exit(1);
-                    }
+                    Err(err) => handle_error(err),
                 }
             }
         }
