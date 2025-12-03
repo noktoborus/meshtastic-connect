@@ -5,7 +5,7 @@ use crate::app::{
     settings::Settings,
     telemetry::Telemetry,
 };
-use egui::{Color32, Frame, RichText, Stroke, Vec2, scroll_area::ScrollBarVisibility};
+use egui::{Color32, Frame, Label, RichText, Stroke, Vec2};
 use meshtastic_connect::keyring::node_id::NodeId;
 use std::collections::HashMap;
 
@@ -147,7 +147,7 @@ impl Roster {
         filtered_nodes.sort_by_key(|(node_info, _)| node_info.node_id);
         filtered_nodes.sort_by_key(|(_, selection)| *selection);
 
-        let scroll_area = egui::ScrollArea::vertical();
+        let scroll_area = egui::ScrollArea::vertical().auto_shrink(false);
         let scroll_area = if self.filter.is_empty() {
             scroll_area.scroll_offset(self.offset)
         } else {
@@ -156,64 +156,62 @@ impl Roster {
 
         let mut next_page = None;
         let mut y_offset = 0.0;
-        let scroll_area_output = scroll_area
-            .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-            .show_viewport(ui, |ui, viewport| {
-                const DEFAULT_HEIGHT: f32 = 20.0;
+        let scroll_area_output = scroll_area.show_viewport(ui, |ui, viewport| {
+            const DEFAULT_HEIGHT: f32 = 20.0;
 
-                y_offset += Frame::new()
-                    .show(ui, |ui| {
-                        if overall_nodes != filtered_nodes.len() {
-                            ui.label(format!(
-                                "filtered nodes: {}/{}",
-                                filtered_nodes.len(),
-                                overall_nodes
-                            ));
-                        } else {
-                            ui.label(format!("nodes: {}", filtered_nodes.len()));
-                        }
-                    })
-                    .response
-                    .rect
-                    .height();
-
-                for (index, (node_info, selection)) in filtered_nodes.iter().enumerate() {
-                    let probably_height = *self
-                        .roster_heights
-                        .get(&node_info.node_id)
-                        .unwrap_or(&DEFAULT_HEIGHT);
-
-                    if y_offset + probably_height < viewport.top() {
-                        y_offset += probably_height;
-                        ui.add_space(probably_height);
-                        continue;
+            y_offset += Frame::new()
+                .show(ui, |ui| {
+                    if overall_nodes != filtered_nodes.len() {
+                        ui.label(format!(
+                            "filtered nodes: {}/{}",
+                            filtered_nodes.len(),
+                            overall_nodes
+                        ));
+                    } else {
+                        ui.label(format!("nodes: {}", filtered_nodes.len()));
                     }
+                })
+                .response
+                .rect
+                .height();
 
-                    if y_offset > viewport.bottom() {
-                        ui.add_space((filtered_nodes.len() - index) as f32 * DEFAULT_HEIGHT);
-                        continue;
+            for (index, (node_info, selection)) in filtered_nodes.iter().enumerate() {
+                let probably_height = *self
+                    .roster_heights
+                    .get(&node_info.node_id)
+                    .unwrap_or(&DEFAULT_HEIGHT);
+
+                if y_offset + probably_height < viewport.top() {
+                    y_offset += probably_height;
+                    ui.add_space(probably_height);
+                    continue;
+                }
+
+                if y_offset > viewport.bottom() {
+                    ui.add_space((filtered_nodes.len() - index) as f32 * DEFAULT_HEIGHT);
+                    continue;
+                }
+                let (panel_command, height) =
+                    self.node_ui(ui, node_info, &mut roster_plugins, *selection);
+                match panel_command {
+                    PanelCommand::Nothing => {
+                        self.roster_heights
+                            .entry(node_info.node_id)
+                            .and_modify(|v| *v = height)
+                            .or_insert(height);
+                        y_offset += height;
                     }
-                    let (panel_command, height) =
-                        self.node_ui(ui, node_info, &mut roster_plugins, *selection);
-                    match panel_command {
-                        PanelCommand::Nothing => {
-                            self.roster_heights
-                                .entry(node_info.node_id)
-                                .and_modify(|v| *v = height)
-                                .or_insert(height);
-                            y_offset += height;
+                    PanelCommand::NextPanel(panel) => {
+                        next_page = Some(panel);
+                        if hide_on_action {
+                            self.show = false;
                         }
-                        PanelCommand::NextPanel(panel) => {
-                            next_page = Some(panel);
-                            if hide_on_action {
-                                self.show = false;
-                            }
-                            ui.ctx().request_repaint();
-                            break;
-                        }
+                        ui.ctx().request_repaint();
+                        break;
                     }
                 }
-            });
+            }
+        });
 
         if self.filter.is_empty() {
             self.offset = scroll_area_output.state.offset;
@@ -239,45 +237,46 @@ impl Roster {
         let show_extended = |ui: &mut egui::Ui, extended: &NodeInfoExtended, is_via_mqtt: bool| {
             let node_id_str = node_info.node_id.to_string();
             ui.horizontal(|ui| {
-                ui.heading(extended.short_name.clone())
+                ui.label(extended.short_name.clone())
                     .on_hover_text("Node's short name");
 
                 if extended.long_name.len() > 0 {
-                    ui.heading(RichText::new(extended.long_name.clone()).strong())
-                        .on_hover_text("Node's long name");
+                    let long_name = RichText::new(extended.long_name.clone()).strong();
+                    let label = Label::new(long_name).wrap_mode(egui::TextWrapMode::Wrap);
+                    ui.add(label).on_hover_text("Node's long name");
                 }
             });
             ui.horizontal(|ui| {
                 if is_via_mqtt {
-                    ui.heading(RichText::new("").color(Color32::LIGHT_GRAY))
+                    ui.label(RichText::new("").color(Color32::LIGHT_GRAY))
                         .on_hover_text("Some packets hearrd via MQTT");
                 }
                 if let Some(pkey) = extended.pkey {
                     let key_size = pkey.as_bytes().len() * 8;
-                    ui.heading(RichText::new("🔒").color(Color32::LIGHT_GREEN))
+                    ui.label(RichText::new("🔒").color(Color32::LIGHT_GREEN))
                         .on_hover_text(format!("{} bit key is announced", key_size));
                 } else {
                     if !extended.is_licensed {
-                        ui.heading(RichText::new("🔓").color(Color32::LIGHT_RED))
+                        ui.label(RichText::new("🔓").color(Color32::LIGHT_RED))
                             .on_hover_text("No key is announced");
                     }
                 }
                 if extended.is_licensed {
-                    ui.heading(RichText::new("🖹").color(Color32::LIGHT_BLUE))
+                    ui.label(RichText::new("🖹").color(Color32::LIGHT_BLUE))
                         .on_hover_text("Node is licensed radio:\nmeaning that node can not\nuse crypto to send messages");
                 }
                 if let Some(is_unmessagable) = extended.is_unmessagable {
                     if is_unmessagable {
-                        ui.heading(RichText::new("🚫").color(Color32::LIGHT_RED))
+                        ui.label(RichText::new("🚫").color(Color32::LIGHT_RED))
                             .on_hover_text("Node is unmessagable (infrastructure)");
                     }
                 }
                 if node_id_str == extended.announced_node_id {
-                    ui.heading(RichText::new(node_id_str))
+                    ui.label(RichText::new(node_id_str))
                         .on_hover_text(format!("Announced: {}", extended.announced_node_id));
                 }
                 else {
-                    ui.heading(RichText::new(node_id_str.clone()).color(Color32::LIGHT_RED))
+                    ui.label(RichText::new(node_id_str.clone()).color(Color32::LIGHT_RED))
                         .on_hover_text(format!("NodeID is {} but announced id is {}", node_id_str, extended.announced_node_id));
                 }
             });
@@ -294,10 +293,10 @@ impl Roster {
                     show_extended(ui, extended, via_mqtt);
                 } else {
                     if via_mqtt {
-                        ui.heading(RichText::new("").color(Color32::LIGHT_GRAY))
+                        ui.label(RichText::new("").color(Color32::LIGHT_GRAY))
                             .on_hover_text("Some packets hearrd via MQTT");
                     }
-                    ui.heading(node_info.node_id.to_string())
+                    ui.label(node_info.node_id.to_string())
                         .on_hover_text("No NodeInfo announced");
                 }
             });
