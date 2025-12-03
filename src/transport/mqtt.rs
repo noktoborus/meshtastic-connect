@@ -111,12 +111,16 @@ impl MqttReceiver {
                             format!("Decode error: {:?}", e),
                         )
                     })?;
-                let gateway_id = NodeId::try_from(service_envelope.gateway_id).map_err(|e| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("Received invalid gateway ID: {:?}", e),
-                    )
-                })?;
+                let gateway_id =
+                    NodeId::try_from(service_envelope.gateway_id.as_str()).map_err(|e| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "Received invalid gateway ID {:?}: {:?}",
+                                service_envelope.gateway_id, e
+                            ),
+                        )
+                    })?;
 
                 if let Some(packet) = service_envelope.packet {
                     return Ok((packet, publish.topic, gateway_id));

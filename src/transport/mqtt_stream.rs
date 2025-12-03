@@ -159,12 +159,13 @@ impl futures::Stream for MqttStream {
                                             )
                                         })?;
                                         if let Some(packet) = service_envelope.packet {
-                                            let gateway = NodeId::try_from(service_envelope.gateway_id)
+                                            let gateway = NodeId::try_from(service_envelope.gateway_id.as_str())
                                                 .map_err(|e| {
                                                     std::io::Error::new(
                                                         std::io::ErrorKind::InvalidData,
                                                         format!(
-                                                            "MQTT proxy gateway id malformed: {:?}",
+                                                            "MQTT proxy gateway id malformed {:?}: {:?}",
+                                                            service_envelope.gateway_id,
                                                             e
                                                         ),
                                                     )
