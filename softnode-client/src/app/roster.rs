@@ -94,6 +94,9 @@ impl Roster {
             .filter(|v| v.is_some())
             .flatten()
             .collect::<Vec<_>>();
+        let filter_compromised = splitted_filter
+            .iter()
+            .any(|splitted| splitted.starts_with("pkey:compromised"));
 
         let mut is_dropped = |node_info: &NodeInfo| -> Option<Selection> {
             let mut selection = Selection::None;
@@ -103,6 +106,19 @@ impl Roster {
                     selection = nselection;
                 }
                 if roster_plugin.node_is_dropped(node_info) {
+                    return None;
+                }
+            }
+            if filter_compromised {
+                if let Some(compromised) = node_info
+                    .extended_info_history
+                    .last()
+                    .map(|extended| matches!(extended.pkey, PublicKey::Compromised(_)))
+                {
+                    if compromised {
+                        return Some(selection);
+                    }
+                } else {
                     return None;
                 }
             }
