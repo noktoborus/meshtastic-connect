@@ -572,13 +572,21 @@ impl NodeInfo {
                 let user =
                     meshtastic::User::decode(data.payload.as_slice()).map_err(|e| e.to_string())?;
 
-                let pkey = if user.public_key.len() > 0 {
+                let mut pkey = if user.public_key.len() > 0 {
                     PublicKey::Key(Key::try_from(user.public_key)?)
                 } else {
                     PublicKey::None
                 };
 
                 if !is_duplicate {
+                    if let Some(last_extended) = self.extended_info_history.last() {
+                        if let PublicKey::Compromised(previous_key) = last_extended.pkey {
+                            if PublicKey::Key(previous_key) == pkey {
+                                pkey = PublicKey::Compromised(previous_key);
+                            }
+                        }
+                    }
+
                     let node_info_extended = NodeInfoExtended {
                         timestamp: stored_timestamp,
                         announced_node_id: user.id.clone(),

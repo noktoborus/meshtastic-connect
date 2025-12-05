@@ -6,7 +6,7 @@ use crate::app::{
     telemetry::Telemetry,
     telemetry_formatter::TelemetryFormatter,
 };
-use egui::{Color32, Frame, Label, RichText, Stroke, Vec2};
+use egui::{Button, Color32, Frame, Label, RichText, SelectableLabel, Stroke, Vec2};
 use meshtastic_connect::keyring::{key::Key, node_id::NodeId};
 use std::collections::HashMap;
 
@@ -89,19 +89,12 @@ impl Roster {
         let splitted_filter = self.filter.split_whitespace().collect::<Vec<&str>>();
         let filter_pkey = splitted_filter
             .iter()
-            .map(|splitted| match Key::try_from(*splitted) {
-                Ok(key) => Some(key),
-                Err(e) => {
-                    println!("{}: {}", splitted, e);
-                    None
-                }
-            })
+            .map(|splitted| Key::try_from(*splitted).ok())
             .flatten()
             .collect::<Vec<_>>();
         let part_node_ids = splitted_filter
             .iter()
             .map(|splitted| ByteNodeId::try_from(*splitted).ok())
-            .filter(|v| v.is_some())
             .flatten()
             .collect::<Vec<_>>();
         let splitted_filter = splitted_filter
@@ -284,13 +277,27 @@ impl Roster {
         let show_extended = |ui: &mut egui::Ui, extended: &NodeInfoExtended, is_via_mqtt: bool| {
             let node_id_str = node_info.node_id.to_string();
             ui.horizontal(|ui| {
-                ui.label(extended.short_name.clone())
-                    .on_hover_text("Node's short name");
+                if ui
+                    .selectable_label(false, extended.short_name.clone())
+                    .on_hover_text("Node's short name\nclick to copy")
+                    .clicked()
+                {
+                    ui.ctx()
+                        .copy_text(format!("{} {}", node_id_str, extended.short_name));
+                }
 
                 if extended.long_name.len() > 0 {
                     let long_name = RichText::new(extended.long_name.clone()).strong();
-                    let label = Label::new(long_name).wrap_mode(egui::TextWrapMode::Wrap);
-                    ui.add(label).on_hover_text("Node's long name");
+                    let label =
+                        Button::selectable(false, long_name).wrap_mode(egui::TextWrapMode::Wrap);
+                    if ui
+                        .add(label)
+                        .on_hover_text("Node's long name\nclick to copy")
+                        .clicked()
+                    {
+                        ui.ctx()
+                            .copy_text(format!("{} {}", node_id_str, extended.long_name));
+                    };
                 }
             });
             ui.horizontal(|ui| {
@@ -330,13 +337,13 @@ impl Roster {
                     }
                 }
                 if node_id_str == extended.announced_node_id {
-                    ui.label(RichText::new(node_id_str))
-                        .on_hover_text(format!("Announced: {}", extended.announced_node_id));
+                    ui.selectable_label(false, RichText::new(node_id_str))
+                        .on_hover_text(format!("Announced: {}", extended.announced_node_id))
                 }
                 else {
-                    ui.label(RichText::new(node_id_str.clone()).color(Color32::LIGHT_RED))
-                        .on_hover_text(format!("NodeID is {} but announced id is {}", node_id_str, extended.announced_node_id));
-                }
+                    ui.selectable_label(false, RichText::new(node_id_str.clone()).color(Color32::LIGHT_RED))
+                        .on_hover_text(format!("NodeID is {} but announced id is {}", node_id_str, extended.announced_node_id))
+                }.clicked().then(|| ui.ctx().copy_text(node_info.node_id.into()));
             });
         };
 
@@ -354,8 +361,13 @@ impl Roster {
                         ui.label(RichText::new("").color(Color32::LIGHT_GRAY))
                             .on_hover_text("Some packets hearrd via MQTT");
                     }
-                    ui.label(node_info.node_id.to_string())
-                        .on_hover_text("No NodeInfo announced");
+                    if ui
+                        .selectable_label(false, node_info.node_id.to_string())
+                        .on_hover_text("No NodeInfo announced")
+                        .clicked()
+                    {
+                        ui.ctx().copy_text(node_info.node_id.into());
+                    };
                 }
             });
             ui.add_space(5.0);

@@ -19,6 +19,7 @@ use egui::mutex::Mutex;
 use fix_gnss::FixGnssLibrary;
 use journal::JournalPanel;
 use map::MapPanel;
+use meshtastic_connect::keyring::key::Key;
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;
@@ -360,20 +361,6 @@ fn is_node_info(stored_mesh_packet: &StoredMeshPacket) -> bool {
 // Find compromised public keys if stored_mesh_packet contains NodeInfo
 fn find_compromised_pkeys(node_id: NodeId, nodes: &mut HashMap<NodeId, NodeInfo>) {
     let mut compromised = false;
-    nodes.entry(node_id).and_modify(|v| {
-        if v.extended_info_history.len() >= 2 {
-            let last = v.extended_info_history.len() - 1;
-            let previous = last - 1;
-
-            if let PublicKey::Compromised(previous_key) = v.extended_info_history[previous].pkey {
-                if PublicKey::Key(previous_key) == v.extended_info_history[last].pkey {
-                    v.extended_info_history[last].pkey = PublicKey::Compromised(previous_key);
-                    return;
-                }
-            }
-        }
-    });
-
     if let Some(PublicKey::Key(pkey)) = nodes
         .get(&node_id)
         .map(|v| v.extended_info_history.last().map(|v| v.pkey.clone()))
@@ -384,7 +371,9 @@ fn find_compromised_pkeys(node_id: NodeId, nodes: &mut HashMap<NodeId, NodeInfo>
                 continue;
             }
             if let Some(other_extended) = other_node_info.extended_info_history.last_mut() {
-                if other_extended.pkey == PublicKey::Key(pkey) {
+                if other_extended.pkey == PublicKey::Key(pkey)
+                    || other_extended.pkey == PublicKey::Compromised(pkey)
+                {
                     other_extended.pkey = PublicKey::Compromised(pkey);
                     compromised = true;
                 }
