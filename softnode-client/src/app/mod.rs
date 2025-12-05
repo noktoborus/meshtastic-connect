@@ -23,7 +23,7 @@ use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;
 
-use crate::app::data::{DataVariant, TelemetryValue};
+use crate::app::data::{DataVariant, PublicKey, TelemetryValue};
 use crate::app::journal::JournalRosterPlugin;
 use crate::app::map::{MapContext, MapRosterPlugin};
 use crate::app::radio_center::assume_position;
@@ -348,6 +348,47 @@ fn go_download(
     );
 }
 
+fn is_node_info(stored_mesh_packet: &StoredMeshPacket) -> bool {
+    if let Some(DataVariant::Decrypted(_, ref data)) = stored_mesh_packet.data {
+        if data.portnum() == meshtastic_connect::meshtastic::PortNum::NodeinfoApp {
+            return true;
+        }
+    }
+    false
+}
+
+// Find compromised public keys if stored_mesh_packet contains NodeInfo
+fn find_compromised_pkeys(node_id: NodeId, nodes: &mut HashMap<NodeId, NodeInfo>) {
+    let mut compromised = false;
+    if let Some(PublicKey::Key(pkey)) = nodes
+        .get(&node_id)
+        .map(|v| v.extended_info_history.last().map(|v| v.pkey.clone()))
+        .flatten()
+    {
+        for other_node_info in nodes.values_mut() {
+            if other_node_info.node_id == node_id {
+                continue;
+            }
+            if let Some(other_extended) = other_node_info.extended_info_history.last_mut() {
+                if other_extended.pkey == PublicKey::Key(pkey) {
+                    other_extended.pkey = PublicKey::Compromised(pkey);
+                    compromised = true;
+                }
+            };
+        }
+    }
+
+    if compromised {
+        nodes.entry(node_id).and_modify(|node_info| {
+            if let Some(extended) = node_info.extended_info_history.last_mut() {
+                if let PublicKey::Key(pkey) = extended.pkey {
+                    extended.pkey = PublicKey::Compromised(pkey);
+                }
+            }
+        });
+    }
+}
+
 impl SoftNodeApp {
     fn update_data(&mut self, ctx: &egui::Context) -> bool {
         let download_state = *self.download_state.lock();
@@ -359,6 +400,7 @@ impl SoftNodeApp {
                 self.last_sync_point = Some(last_record.sequence_number);
             }
             let mut affected_nodes = Vec::new();
+            let mut node_info_changed = Vec::new();
 
             for stored_mesh_packet in data.drain(..) {
                 let node_id = stored_mesh_packet.header.from;
@@ -383,7 +425,14 @@ impl SoftNodeApp {
 
                 entry.update(&stored_mesh_packet, &self.fix_gnss);
                 self.journal.push(stored_mesh_packet.clone().into());
+                if is_node_info(&stored_mesh_packet) {
+                    node_info_changed.push(node_id);
+                }
                 affected_nodes.push(node_id);
+            }
+
+            for node_id in node_info_changed {
+                find_compromised_pkeys(node_id, &mut self.nodes);
             }
 
             for node_id in affected_nodes {

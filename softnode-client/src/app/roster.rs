@@ -1,6 +1,6 @@
 use crate::app::{
     byte_node_id::ByteNodeId,
-    data::{NodeInfo, NodeInfoExtended, TelemetryValue, TelemetryVariant},
+    data::{NodeInfo, NodeInfoExtended, PublicKey, TelemetryValue, TelemetryVariant},
     radio_telemetry::RadioTelemetry,
     settings::Settings,
     telemetry::Telemetry,
@@ -251,10 +251,14 @@ impl Roster {
                     ui.label(RichText::new("").color(Color32::LIGHT_GRAY))
                         .on_hover_text("Some packets hearrd via MQTT");
                 }
-                if let Some(pkey) = extended.pkey {
+                if let PublicKey::Key(pkey) = extended.pkey {
                     let key_size = pkey.as_bytes().len() * 8;
                     ui.label(RichText::new("🔒").color(Color32::LIGHT_GREEN))
                         .on_hover_text(format!("{} bit key: {}", key_size, pkey.to_string()));
+                } else if let PublicKey::Compromised(pkey) = extended.pkey {
+                    let key_size = pkey.as_bytes().len() * 8;
+                    ui.label(RichText::new("🔒").color(Color32::YELLOW))
+                        .on_hover_text(format!("{} bit key: {}\nbut key used by another node", key_size, pkey.to_string()));
                 } else {
                     if !extended.is_licensed {
                         ui.label(RichText::new("🔓").color(Color32::LIGHT_RED))

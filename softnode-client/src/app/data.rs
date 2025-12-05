@@ -431,13 +431,24 @@ pub struct NodePacket {
     pub is_duplicate: bool,
 }
 
+// Public key variant
+#[derive(Default, serde::Deserialize, serde::Serialize, PartialEq, Clone)]
+pub enum PublicKey {
+    #[default]
+    None,
+    // Normal key: set while message's decoding
+    Key(Key),
+    // Key used by another node, set on nodes' list processing stage
+    Compromised(Key),
+}
+
 #[derive(Default, serde::Deserialize, serde::Serialize, PartialEq)]
 pub struct NodeInfoExtended {
     pub timestamp: DateTime<Utc>,
     pub announced_node_id: String,
     pub long_name: String,
     pub short_name: String,
-    pub pkey: Option<Key>,
+    pub pkey: PublicKey,
     pub is_licensed: bool,
     pub is_unmessagable: Option<bool>,
 }
@@ -562,9 +573,9 @@ impl NodeInfo {
                     meshtastic::User::decode(data.payload.as_slice()).map_err(|e| e.to_string())?;
 
                 let pkey = if user.public_key.len() > 0 {
-                    Some(Key::try_from(user.public_key)?)
+                    PublicKey::Key(Key::try_from(user.public_key)?)
                 } else {
-                    None
+                    PublicKey::None
                 };
 
                 if !is_duplicate {
