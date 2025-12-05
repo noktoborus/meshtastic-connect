@@ -1,6 +1,6 @@
-use std::sync::LazyLock;
-
+use crate::app::telemetry_formatter::{BarometricUnit, TelemetryFormatter, TemperatureUnit};
 use meshtastic_connect::keyring::{Keyring, key::Key, node_id::NodeId};
+use std::sync::LazyLock;
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Settings {
@@ -18,7 +18,12 @@ impl Settings {
         }
     }
 
-    pub fn ui(&mut self, ctx: &egui::Context, keyring: &mut Keyring) -> bool {
+    pub fn ui(
+        &mut self,
+        ctx: &egui::Context,
+        keyring: &mut Keyring,
+        telemetry_formatter: &mut TelemetryFormatter,
+    ) -> bool {
         let mut need_update = false;
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -29,6 +34,28 @@ impl Settings {
             #[cfg(target_os = "linux")]
             ui.label("Настройки хранятся локально в $HOME/.local/share/Softnode");
             ui.label("При обновлении версии приложения, настройки могут быть сброшены на значения по умолчанию");
+            ui.add_space(SPACE_SIZE);
+
+            let text = telemetry_formatter.temperature_units.to_string();
+            egui::ComboBox::from_label("Temperature Units").selected_text(text).show_ui(ui, |ui| {
+                ui.selectable_value(&mut telemetry_formatter.temperature_units,
+                    TemperatureUnit::Celsius, TemperatureUnit::Celsius.to_string());
+                ui.selectable_value(&mut telemetry_formatter.temperature_units,
+                    TemperatureUnit::Fahrenheit, TemperatureUnit::Fahrenheit.to_string());
+
+            });
+
+            let text = telemetry_formatter.barometric_units.to_string();
+            egui::ComboBox::from_label("Barometric Units").selected_text(text).show_ui(ui, |ui|  {
+                ui.selectable_value(&mut telemetry_formatter.barometric_units,
+                    BarometricUnit::Hectopascals,
+                    BarometricUnit::Hectopascals.to_string());
+                ui.selectable_value(&mut telemetry_formatter.barometric_units,
+                    BarometricUnit::MillimetersOfMercury,
+                    BarometricUnit::MillimetersOfMercury.to_string());
+
+            });
+
             ui.add_space(SPACE_SIZE);
 
             egui::ScrollArea::vertical().show(ui, |ui| {

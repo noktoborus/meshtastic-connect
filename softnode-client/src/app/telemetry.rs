@@ -3,7 +3,10 @@ use egui::{Align2, Color32, RichText, Style, TextStyle, epaint::Hsva};
 use egui_plot::{HLine, Line, PlotItem, PlotUi, Points, Text};
 use std::{sync::Arc, time::Duration};
 
-use crate::app::data::{NodeTelemetry, TelemetryValue};
+use crate::app::{
+    data::{NodeTelemetry, TelemetryValue, TelemetryVariant},
+    telemetry_formatter::TelemetryFormatter,
+};
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Telemetry {}
@@ -49,13 +52,15 @@ fn plot_value(
     value: &TelemetryValue,
     anchor: Align2,
     basetime: DateTime<Utc>,
+    telemetry_formatter: &TelemetryFormatter,
+    telemetry_variant: TelemetryVariant,
 ) {
     let point = [
         ((value.timestamp.timestamp() - basetime.timestamp()) / 60) as f64,
-        value.value,
+        telemetry_formatter.value(value.value, telemetry_variant),
     ];
 
-    let title = format!("{:.2}", point[1]);
+    let title = telemetry_formatter.format(value.value, telemetry_variant);
 
     let text_widget = RichText::new(title)
         .text_style(text_value_style)
@@ -117,7 +122,8 @@ impl Telemetry {
         &mut self,
         ui: &mut egui::Ui,
         start_time: DateTime<Utc>,
-        telemetry: Vec<(String, &NodeTelemetry)>,
+        telemetry: Vec<(String, TelemetryVariant, &NodeTelemetry)>,
+        telemetry_formatter: &TelemetryFormatter,
     ) {
         let mut color_generator: ColorGenerator = Default::default();
         let basetime = self.base_datetime(start_time);
@@ -144,7 +150,7 @@ impl Telemetry {
         let style = ui.style().clone();
         legend_plot.show(ui, |plot_ui| {
             let text_value_style = plot_value_is_printable(plot_ui);
-            for (title, node_telemetry) in telemetry.iter() {
+            for (title, telemetry_variant, node_telemetry) in telemetry.iter() {
                 let mut min_value: Option<TelemetryValue> = None;
                 let mut max_value: Option<TelemetryValue> = None;
                 let points: Vec<[f64; 2]> = node_telemetry
@@ -159,7 +165,7 @@ impl Telemetry {
                         }
                         [
                             ((v.timestamp.timestamp() - basetime.timestamp()) / 60) as f64,
-                            v.value,
+                            telemetry_formatter.value(v.value, *telemetry_variant),
                         ]
                     })
                     .collect();
@@ -167,7 +173,14 @@ impl Telemetry {
                 let plot_points = Points::new(title, points.clone()).radius(4.0).color(color);
                 if min_value != max_value {
                     if let Some(min_value) = &min_value {
-                        plot_ui.hline(HLine::new(title, min_value.value).color(color).width(0.5));
+                        plot_ui.hline(
+                            HLine::new(
+                                title,
+                                telemetry_formatter.value(min_value.value, *telemetry_variant),
+                            )
+                            .color(color)
+                            .width(0.5),
+                        );
                         plot_value(
                             TextStyle::Small,
                             &style,
@@ -177,11 +190,20 @@ impl Telemetry {
                             &min_value,
                             Align2::CENTER_TOP,
                             basetime,
+                            telemetry_formatter,
+                            *telemetry_variant,
                         );
                     }
 
                     if let Some(max_value) = &max_value {
-                        plot_ui.hline(HLine::new(title, max_value.value).color(color).width(0.5));
+                        plot_ui.hline(
+                            HLine::new(
+                                title,
+                                telemetry_formatter.value(max_value.value, *telemetry_variant),
+                            )
+                            .color(color)
+                            .width(0.5),
+                        );
                         plot_value(
                             TextStyle::Small,
                             &style,
@@ -191,6 +213,8 @@ impl Telemetry {
                             &max_value,
                             Align2::CENTER_BOTTOM,
                             basetime,
+                            telemetry_formatter,
+                            *telemetry_variant,
                         );
                     }
                 }
@@ -212,6 +236,8 @@ impl Telemetry {
                                 first_value,
                                 Align2::RIGHT_CENTER,
                                 basetime,
+                                telemetry_formatter,
+                                *telemetry_variant,
                             );
                         }
                     }
@@ -227,6 +253,8 @@ impl Telemetry {
                                 min_peaks_value,
                                 Align2::CENTER_BOTTOM,
                                 basetime,
+                                telemetry_formatter,
+                                *telemetry_variant,
                             );
                         }
                         for max_peaks_value in node_telemetry.max_peaks.iter() {
@@ -239,6 +267,8 @@ impl Telemetry {
                                 max_peaks_value,
                                 Align2::CENTER_TOP,
                                 basetime,
+                                telemetry_formatter,
+                                *telemetry_variant,
                             );
                         }
                     }
@@ -253,6 +283,8 @@ impl Telemetry {
                         last_value,
                         Align2::LEFT_CENTER,
                         basetime,
+                        telemetry_formatter,
+                        *telemetry_variant,
                     );
                 }
             }

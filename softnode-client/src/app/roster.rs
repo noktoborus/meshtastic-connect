@@ -1,9 +1,10 @@
 use crate::app::{
     byte_node_id::ByteNodeId,
-    data::{NodeInfo, NodeInfoExtended, TelemetryVariant},
+    data::{NodeInfo, NodeInfoExtended, TelemetryValue, TelemetryVariant},
     radio_telemetry::RadioTelemetry,
     settings::Settings,
     telemetry::Telemetry,
+    telemetry_formatter::TelemetryFormatter,
 };
 use egui::{Color32, Frame, Label, RichText, Stroke, Vec2};
 use meshtastic_connect::keyring::node_id::NodeId;
@@ -62,6 +63,7 @@ impl Roster {
     pub fn ui<'a>(
         &mut self,
         ui: &mut egui::Ui,
+        telemetry_formatter: &TelemetryFormatter,
         mut roster_plugins: Vec<Box<dyn Plugin + 'a>>,
         nodes: Vec<&NodeInfo>,
         hide_on_action: bool,
@@ -191,8 +193,13 @@ impl Roster {
                     ui.add_space((filtered_nodes.len() - index) as f32 * DEFAULT_HEIGHT);
                     continue;
                 }
-                let (panel_command, height) =
-                    self.node_ui(ui, node_info, &mut roster_plugins, *selection);
+                let (panel_command, height) = self.node_ui(
+                    ui,
+                    node_info,
+                    &mut roster_plugins,
+                    telemetry_formatter,
+                    *selection,
+                );
                 match panel_command {
                     PanelCommand::Nothing => {
                         self.roster_heights
@@ -224,16 +231,9 @@ impl Roster {
         ui: &mut egui::Ui,
         node_info: &NodeInfo,
         roster_plugins: &mut Vec<Box<dyn Plugin + 'a>>,
+        telemetry_formatter: &TelemetryFormatter,
         selection: Selection,
     ) -> (PanelCommand, f32) {
-        let telemetry_variants = node_info
-            .telemetry
-            .iter()
-            .map(|(k, v)| (k, v.values.len()))
-            .filter(|(_, v)| *v > 1)
-            .map(|(k, _)| k)
-            .collect::<Vec<_>>();
-
         let show_extended = |ui: &mut egui::Ui, extended: &NodeInfoExtended, is_via_mqtt: bool| {
             let node_id_str = node_info.node_id.to_string();
             ui.horizontal(|ui| {
@@ -254,7 +254,7 @@ impl Roster {
                 if let Some(pkey) = extended.pkey {
                     let key_size = pkey.as_bytes().len() * 8;
                     ui.label(RichText::new("🔒").color(Color32::LIGHT_GREEN))
-                        .on_hover_text(format!("{} bit key is announced", key_size));
+                        .on_hover_text(format!("{} bit key: {}", key_size, pkey.to_string()));
                 } else {
                     if !extended.is_licensed {
                         ui.label(RichText::new("🔓").color(Color32::LIGHT_RED))
@@ -342,7 +342,56 @@ impl Roster {
             });
             panel_command
         };
-        let show_plugins = |ui: &mut egui::Ui| -> PanelCommand {
+        let mut show_telemetry_button =
+            |ui: &mut egui::Ui,
+             telemetry_variant: &TelemetryVariant,
+             telemetry_value: &TelemetryValue,
+             previous_value: Option<&TelemetryValue>| {
+                let telemetry_enabled_index = self
+                    .telemetry_enabled_for
+                    .get(telemetry_variant)
+                    .map(|v| v.iter().position(|v| v == &node_info.node_id))
+                    .unwrap_or(None);
+
+                let tooltip = telemetry_variant.to_string();
+                let mut enabled = telemetry_enabled_index.is_some();
+                let mut text = RichText::new(
+                    telemetry_formatter.format(telemetry_value.value, *telemetry_variant),
+                );
+                if let Some(previous_value) = previous_value {
+                    if previous_value.value > telemetry_value.value {
+                        text = text.color(Color32::LIGHT_RED);
+                    } else if previous_value.value < telemetry_value.value {
+                        text = text.color(Color32::LIGHT_GREEN);
+                    }
+                }
+                let label = ui
+                    .selectable_label(enabled, text)
+                    .on_hover_text(tooltip.as_str());
+                if label.long_touched() {
+                    label.show_tooltip_text(tooltip.as_str());
+                };
+                if label.clicked() {
+                    enabled = !enabled;
+                };
+
+                if enabled && telemetry_enabled_index.is_none() {
+                    self.telemetry_enabled_for
+                        .entry(*telemetry_variant)
+                        .or_insert(Default::default())
+                        .push(node_info.node_id);
+                } else if !enabled {
+                    if let Some(position) = telemetry_enabled_index {
+                        self.telemetry_enabled_for
+                            .entry(*telemetry_variant)
+                            .and_modify(|v| {
+                                v.swap_remove(position);
+                            });
+                    }
+                }
+            };
+
+        let mut show_plugins = |ui: &mut egui::Ui| -> PanelCommand {
             for roster_plugin in roster_plugins.iter_mut() {
                 let probably_panel_command = roster_plugin.panel_node_ui(ui, node_info);
                 if !matches!(probably_panel_command, PanelCommand::Nothing) {
@@ -351,31 +400,45 @@ impl Roster {
                 ui.add_space(5.0);
             }
 
-            for telemetry_variant in telemetry_variants {
-                let position = self
-                    .telemetry_enabled_for
-                    .get(telemetry_variant)
-                    .map(|v| v.iter().position(|v| v == &node_info.node_id))
-                    .unwrap_or(None);
-                let mut enabled = position.is_some();
+            let device_telemetry = [
+                TelemetryVariant::ChannelUtilization,
+                TelemetryVariant::AirUtilTx,
+                TelemetryVariant::Voltage,
+                TelemetryVariant::BatteryLevel,
+            ];
 
-                ui.checkbox(&mut enabled, telemetry_variant.to_string());
+            let mut telemetry_variants = node_info
+                .telemetry
+                .iter()
+                .map(|(k, _)| *k)
+                .filter(|k| !device_telemetry.contains(k))
+                .collect::<Vec<_>>();
+            telemetry_variants.sort();
 
-                if enabled && position.is_none() {
-                    self.telemetry_enabled_for
-                        .entry(*telemetry_variant)
-                        .or_insert(Default::default())
-                        .push(node_info.node_id);
-                } else if !enabled {
-                    if let Some(position) = position {
-                        self.telemetry_enabled_for
-                            .entry(*telemetry_variant)
-                            .and_modify(|v| {
-                                v.swap_remove(position);
-                            });
+            ui.horizontal_wrapped(|ui| {
+                for telemetry_variant in device_telemetry.iter() {
+                    if let Some(telemetry_values) = node_info.telemetry.get(telemetry_variant) {
+                        let mut iterator = telemetry_values.values.iter();
+                        if let Some(telemetry_value) = iterator.next_back() {
+                            let previous = iterator.next_back();
+                            show_telemetry_button(ui, telemetry_variant, telemetry_value, previous);
+                        }
                     }
                 }
-            }
+            });
+
+            ui.horizontal_wrapped(|ui| {
+                for telemetry_variant in telemetry_variants.iter() {
+                    if let Some(telemetry_values) = node_info.telemetry.get(telemetry_variant) {
+                        let mut iterator = telemetry_values.values.iter();
+                        if let Some(telemetry_value) = iterator.next_back() {
+                            let previous = iterator.next_back();
+                            show_telemetry_button(ui, telemetry_variant, telemetry_value, previous);
+                        }
+                    }
+                }
+            });
+
             PanelCommand::Nothing
         };
 

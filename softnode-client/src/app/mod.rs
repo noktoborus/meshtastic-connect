@@ -5,6 +5,7 @@ mod map;
 mod radio_telemetry;
 pub mod settings;
 mod telemetry;
+mod telemetry_formatter;
 use std::{collections::HashMap, f32, ops::ControlFlow, sync::Arc};
 pub mod color_generator;
 pub mod fix_gnss;
@@ -22,11 +23,12 @@ use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;
 
-use crate::app::data::TelemetryValue;
+use crate::app::data::{DataVariant, TelemetryValue};
 use crate::app::journal::JournalRosterPlugin;
 use crate::app::map::{MapContext, MapRosterPlugin};
 use crate::app::radio_center::assume_position;
 use crate::app::roster::{Panel, Roster};
+use crate::app::telemetry_formatter::TelemetryFormatter;
 
 #[derive(Clone, Copy)]
 pub enum DownloadState {
@@ -64,8 +66,8 @@ impl Default for DownloadState {
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct PersistentData {
+    pub telemetry_formatter: TelemetryFormatter,
     pub active_panel: Panel,
-
     pub roster: Roster,
     pub journal: JournalPanel,
     pub map: MapPanel,
@@ -95,6 +97,7 @@ pub struct SoftNodeApp {
 impl Default for PersistentData {
     fn default() -> Self {
         Self {
+            telemetry_formatter: TelemetryFormatter::default(),
             active_panel: Panel::Journal,
             journal: JournalPanel::new(),
             roster: Default::default(),
@@ -452,7 +455,11 @@ impl SoftNodeApp {
                                         } else {
                                             format!("{}: {}", telemetry_variant, node_id)
                                         };
-                                        telemetry_list.push((title, telemetry_store));
+                                        telemetry_list.push((
+                                            title,
+                                            *telemetry_variant,
+                                            telemetry_store,
+                                        ));
                                     }
                                 }
                             }
@@ -460,7 +467,12 @@ impl SoftNodeApp {
                     }
 
                     if telemetry_list.len() != 0 {
-                        telemetry.ui(ui, start_datetime, telemetry_list)
+                        telemetry.ui(
+                            ui,
+                            start_datetime,
+                            telemetry_list,
+                            &self.persistent.telemetry_formatter,
+                        )
                     } else {
                         self.persistent.roster.show = true;
                         ui.label("Select a telemetry on left panel to display");
@@ -468,7 +480,11 @@ impl SoftNodeApp {
                 });
             }
             Panel::Settings(settings) => {
-                if settings.ui(ctx, &mut self.keyring) {
+                if settings.ui(
+                    ctx,
+                    &mut self.keyring,
+                    &mut self.persistent.telemetry_formatter,
+                ) {
                     self.last_sync_point = None;
                     self.download_state = Default::default();
                     self.download_data = Default::default();
@@ -905,6 +921,7 @@ impl eframe::App for SoftNodeApp {
             egui::SidePanel::left("Roster").show(ctx, |ui| {
                 if let Some(next_panel) = roster.ui(
                     ui,
+                    &self.persistent.telemetry_formatter,
                     vec![map_plugin, journal_plugin],
                     nodes_list,
                     hide_on_action,
