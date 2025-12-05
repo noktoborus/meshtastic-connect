@@ -7,7 +7,7 @@ use crate::app::{
     telemetry_formatter::TelemetryFormatter,
 };
 use egui::{Color32, Frame, Label, RichText, Stroke, Vec2};
-use meshtastic_connect::keyring::node_id::NodeId;
+use meshtastic_connect::keyring::{key::Key, node_id::NodeId};
 use std::collections::HashMap;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -86,13 +86,27 @@ impl Roster {
             roster_plugin.panel_header_ui(ui);
         }
 
-        let normalized_filter = self.filter.to_lowercase();
-        let splitted_filter = normalized_filter.split_whitespace().collect::<Vec<&str>>();
+        let splitted_filter = self.filter.split_whitespace().collect::<Vec<&str>>();
+        let filter_pkey = splitted_filter
+            .iter()
+            .map(|splitted| match Key::try_from(*splitted) {
+                Ok(key) => Some(key),
+                Err(e) => {
+                    println!("{}: {}", splitted, e);
+                    None
+                }
+            })
+            .flatten()
+            .collect::<Vec<_>>();
         let part_node_ids = splitted_filter
             .iter()
             .map(|splitted| ByteNodeId::try_from(*splitted).ok())
             .filter(|v| v.is_some())
             .flatten()
+            .collect::<Vec<_>>();
+        let splitted_filter = splitted_filter
+            .iter()
+            .map(|v| v.to_lowercase())
             .collect::<Vec<_>>();
         let filter_compromised = splitted_filter
             .iter()
@@ -109,21 +123,39 @@ impl Roster {
                     return None;
                 }
             }
-            if filter_compromised {
-                if let Some(compromised) = node_info
+            if self.filter.is_empty() {
+                return Some(selection);
+            }
+            if filter_compromised || !filter_pkey.is_empty() {
+                if let Some(pkey) = node_info
                     .extended_info_history
                     .last()
-                    .map(|extended| matches!(extended.pkey, PublicKey::Compromised(_)))
+                    .map(|v| v.pkey.clone())
                 {
-                    if compromised {
+                    if filter_compromised && matches!(pkey, PublicKey::Compromised(_)) {
                         return Some(selection);
+                    }
+                    for filter_pkey in &filter_pkey {
+                        println!("search for pkey: {}", filter_pkey);
+                        match pkey {
+                            PublicKey::None => {
+                                return None;
+                            }
+                            PublicKey::Key(key) => {
+                                if key == *filter_pkey {
+                                    return Some(selection);
+                                }
+                            }
+                            PublicKey::Compromised(key) => {
+                                if key == *filter_pkey {
+                                    return Some(selection);
+                                }
+                            }
+                        }
                     }
                 } else {
                     return None;
                 }
-            }
-            if normalized_filter.is_empty() {
-                return Some(selection);
             }
             for part_node_id in &part_node_ids {
                 if *part_node_id == node_info.node_id {
@@ -269,18 +301,23 @@ impl Roster {
                 }
                 if let PublicKey::Key(pkey) = extended.pkey {
                     let key_size = pkey.as_bytes().len() * 8;
-                    ui.label(RichText::new("🔒").color(Color32::LIGHT_GREEN))
-                        .on_hover_text(format!("{} bit key: {}", key_size, pkey.to_string()));
+                    if ui.selectable_label(false, RichText::new("🔒").color(Color32::LIGHT_GREEN))
+                        .on_hover_text(format!("{} bit key: {}", key_size, pkey.to_string())).clicked() {
+                            ui.ctx().copy_text(pkey.to_string());
+                        }
                 } else if let PublicKey::Compromised(pkey) = extended.pkey {
                     let key_size = pkey.as_bytes().len() * 8;
-                    ui.label(RichText::new("🔒").color(Color32::YELLOW))
-                        .on_hover_text(format!("{} bit key: {}\nbut key used by another node", key_size, pkey.to_string()));
+                    if ui.selectable_label(false, RichText::new("🔒").color(Color32::YELLOW))
+                        .on_hover_text(format!("{} bit key: {}\nbut key used by another node", key_size, pkey.to_string())).clicked() {
+                            ui.ctx().copy_text(pkey.to_string());
+                        }
                 } else {
                     if !extended.is_licensed {
-                        ui.label(RichText::new("🔓").color(Color32::LIGHT_RED))
+                        ui.selectable_label(false, RichText::new("🔓").color(Color32::LIGHT_RED))
                             .on_hover_text("No key is announced");
                     }
-                }
+                };
+
                 if extended.is_licensed {
                     ui.label(RichText::new("🖹").color(Color32::LIGHT_BLUE))
                         .on_hover_text("Node is licensed radio:\nmeaning that node can not\nuse crypto to send messages");
