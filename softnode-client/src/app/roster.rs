@@ -136,7 +136,6 @@ impl Roster {
                         return Some(selection);
                     }
                     for filter_pkey in &filter_pkey {
-                        println!("search for pkey: {}", filter_pkey);
                         match pkey {
                             PublicKey::None => {
                                 return None;
@@ -301,14 +300,16 @@ impl Roster {
                 }
                 if let PublicKey::Key(pkey) = extended.pkey {
                     let key_size = pkey.as_bytes().len() * 8;
+                    let hover_text = format!("{} bit key: {}\nclick to copy key", key_size, pkey);
                     if ui.selectable_label(false, RichText::new("🔒").color(Color32::LIGHT_GREEN))
-                        .on_hover_text(format!("{} bit key: {}", key_size, pkey.to_string())).clicked() {
+                        .on_hover_text(hover_text).clicked() {
                             ui.ctx().copy_text(pkey.to_string());
                         }
                 } else if let PublicKey::Compromised(pkey) = extended.pkey {
                     let key_size = pkey.as_bytes().len() * 8;
+                    let hover_text = format!("{} bit key: {}\nbut key used by another node\nclick to copy key", key_size, pkey);
                     if ui.selectable_label(false, RichText::new("🔒").color(Color32::YELLOW))
-                        .on_hover_text(format!("{} bit key: {}\nbut key used by another node", key_size, pkey.to_string())).clicked() {
+                        .on_hover_text(hover_text).clicked() {
                             ui.ctx().copy_text(pkey.to_string());
                         }
                 } else {

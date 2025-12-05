@@ -360,6 +360,20 @@ fn is_node_info(stored_mesh_packet: &StoredMeshPacket) -> bool {
 // Find compromised public keys if stored_mesh_packet contains NodeInfo
 fn find_compromised_pkeys(node_id: NodeId, nodes: &mut HashMap<NodeId, NodeInfo>) {
     let mut compromised = false;
+    nodes.entry(node_id).and_modify(|v| {
+        if v.extended_info_history.len() >= 2 {
+            let last = v.extended_info_history.len() - 1;
+            let previous = last - 1;
+
+            if let PublicKey::Compromised(previous_key) = v.extended_info_history[previous].pkey {
+                if PublicKey::Key(previous_key) == v.extended_info_history[last].pkey {
+                    v.extended_info_history[last].pkey = PublicKey::Compromised(previous_key);
+                    return;
+                }
+            }
+        }
+    });
+
     if let Some(PublicKey::Key(pkey)) = nodes
         .get(&node_id)
         .map(|v| v.extended_info_history.last().map(|v| v.pkey.clone()))
@@ -431,10 +445,6 @@ impl SoftNodeApp {
                 affected_nodes.push(node_id);
             }
 
-            for node_id in node_info_changed {
-                find_compromised_pkeys(node_id, &mut self.nodes);
-            }
-
             for node_id in affected_nodes {
                 let assumed_position = if let Some(node_info) = self.nodes.get(&node_id) {
                     if node_info.position.is_empty()
@@ -450,6 +460,10 @@ impl SoftNodeApp {
                 self.nodes
                     .entry(node_id)
                     .and_modify(|v| v.assumed_position = assumed_position);
+            }
+
+            for node_id in node_info_changed {
+                find_compromised_pkeys(node_id, &mut self.nodes);
             }
 
             if matches!(download_state, DownloadState::Idle) {
