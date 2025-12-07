@@ -19,7 +19,6 @@ use egui::mutex::Mutex;
 use fix_gnss::FixGnssLibrary;
 use journal::JournalPanel;
 use map::MapPanel;
-use meshtastic_connect::keyring::key::Key;
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use settings::Settings;
 use telemetry::Telemetry;

@@ -1,7 +1,7 @@
 use chrono::{DateTime, NaiveTime, Utc};
-use egui::{Color32, epaint::Hsva};
-use egui_plot::PlotItem;
-use std::time::Duration;
+use egui::{Color32, RichText, TextStyle, emath::OrderedFloat, epaint::Hsva};
+use egui_plot::{HLine, PlotItem, Text};
+use std::{collections::HashMap, time::Duration};
 
 use crate::app::data::TelemetryValue;
 
@@ -105,6 +105,11 @@ impl RadioTelemetry {
             .custom_x_axes(x_axes)
             .x_grid_spacer(Self::x_grid)
             .label_formatter(|a, b| lf.format(a, b));
+        let sum_color = ui.style().visuals.text_color();
+        let sum_background_color = ui.style().visuals.extreme_bg_color;
+        let mut sum_values: HashMap<OrderedFloat<f64>, usize> = HashMap::new();
+        let mut sum_start_offset: f64 = 0.0;
+        let mut sum_end_offset: f64 = 0.0;
 
         legend_plot.show(ui, |plot_ui| {
             // if let Some((title, node_telemetry)) = telemetry.first() {
@@ -112,10 +117,20 @@ impl RadioTelemetry {
                 let points: Vec<[f64; 2]> = node_telemetry
                     .iter()
                     .map(|v| {
-                        [
-                            ((v.timestamp.timestamp() - basetime.timestamp()) / 60) as f64,
-                            v.value,
-                        ]
+                        // graph minimum unit is minute, so we divide by 60 to get minutes
+                        let offset_x =
+                            (v.timestamp.timestamp() - basetime.timestamp()) as f64 / 60.0;
+                        if sum_start_offset == 0.0 {
+                            sum_start_offset = offset_x;
+                        } else {
+                            sum_start_offset = sum_start_offset.min(offset_x)
+                        }
+                        sum_end_offset = sum_end_offset.max(offset_x);
+                        sum_values
+                            .entry(OrderedFloat(v.value))
+                            .and_modify(|c| *c += 1)
+                            .or_insert(1);
+                        [offset_x, v.value]
                     })
                     .collect();
 
@@ -134,6 +149,23 @@ impl RadioTelemetry {
                     plot_ui.line(egui_plot::Line::new(title, points).id(id).color(color));
                 } else {
                     plot_ui.points(plot_points);
+                }
+            }
+            for (value, count) in &sum_values {
+                let hline = HLine::new("Counter", value.0).color(sum_color).width(1.0);
+                plot_ui.hline(hline);
+
+                let point = [sum_start_offset - 1.0, value.0];
+                let label = RichText::new(count.to_string())
+                    .text_style(TextStyle::Small)
+                    .color(sum_color)
+                    .background_color(sum_background_color);
+                let text = Text::new("Counter", point.into(), label.clone());
+                plot_ui.text(text);
+                if sum_end_offset > sum_start_offset {
+                    let point = [sum_end_offset + 1.0, value.0];
+                    let text = Text::new("Counter", point.into(), label);
+                    plot_ui.text(text);
                 }
             }
         });
