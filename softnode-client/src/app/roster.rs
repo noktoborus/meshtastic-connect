@@ -6,7 +6,7 @@ use crate::app::{
     telemetry::Telemetry,
     telemetry_formatter::TelemetryFormatter,
 };
-use egui::{Button, Color32, Frame, Label, RichText, SelectableLabel, Stroke, Vec2};
+use egui::{Button, Color32, Frame, RichText, Stroke, Vec2};
 use meshtastic_connect::keyring::{key::Key, node_id::NodeId};
 use std::collections::HashMap;
 
