@@ -2,6 +2,7 @@ pub mod byte_node_id;
 pub mod data;
 mod journal;
 mod map;
+mod node_filter;
 mod radio_telemetry;
 pub mod settings;
 mod telemetry;

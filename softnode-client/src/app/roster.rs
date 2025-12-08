@@ -1,6 +1,7 @@
 use crate::app::{
     byte_node_id::ByteNodeId,
     data::{NodeInfo, NodeInfoExtended, PublicKey, TelemetryValue, TelemetryVariant},
+    node_filter,
     radio_telemetry::RadioTelemetry,
     settings::Settings,
     telemetry::Telemetry,
@@ -74,118 +75,34 @@ impl Roster {
                 .desired_width(f32::INFINITY)
                 .hint_text("Search node by id or name")
                 .show(ui);
-            ui.input(|i| {
-                if i.key_pressed(egui::Key::Escape) {
-                    self.show = false;
-                    self.filter.clear();
-                }
-            })
         });
 
         for roster_plugin in roster_plugins.iter_mut() {
             roster_plugin.panel_header_ui(ui);
         }
 
-        let splitted_filter = self.filter.split_whitespace().collect::<Vec<&str>>();
-        let filter_pkey = splitted_filter
-            .iter()
-            .map(|splitted| Key::try_from(*splitted).ok())
-            .flatten()
-            .collect::<Vec<_>>();
-        let part_node_ids = splitted_filter
-            .iter()
-            .map(|splitted| ByteNodeId::try_from(*splitted).ok())
-            .flatten()
-            .collect::<Vec<_>>();
-        let splitted_filter = splitted_filter
-            .iter()
-            .map(|v| v.to_lowercase())
-            .collect::<Vec<_>>();
-        let filter_compromised = splitted_filter
-            .iter()
-            .any(|splitted| splitted.starts_with("pkey:compromised"));
+        let mut node_filter = node_filter::NodeFilter::new();
+        node_filter.update_filter(self.filter.as_str());
+        let iterator = node_filter.filter(&nodes);
 
-        let mut is_dropped = |node_info: &NodeInfo| -> Option<Selection> {
-            let mut selection = Selection::None;
-            for roster_plugin in roster_plugins.iter_mut() {
-                let nselection = roster_plugin.node_is_selected(node_info);
-                if nselection != Selection::None {
-                    selection = nselection;
-                }
-                if roster_plugin.node_is_dropped(node_info) {
-                    return None;
-                }
-            }
-            if self.filter.is_empty() {
-                return Some(selection);
-            }
-            if filter_compromised || !filter_pkey.is_empty() {
-                if let Some(pkey) = node_info
-                    .extended_info_history
-                    .last()
-                    .map(|v| v.pkey.clone())
-                {
-                    if filter_compromised && matches!(pkey, PublicKey::Compromised(_)) {
-                        return Some(selection);
-                    }
-                    for filter_pkey in &filter_pkey {
-                        match pkey {
-                            PublicKey::None => {
-                                return None;
-                            }
-                            PublicKey::Key(key) => {
-                                if key == *filter_pkey {
-                                    return Some(selection);
-                                }
-                            }
-                            PublicKey::Compromised(key) => {
-                                if key == *filter_pkey {
-                                    return Some(selection);
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    return None;
-                }
-            }
-            for part_node_id in &part_node_ids {
-                if *part_node_id == node_info.node_id {
-                    return Some(selection);
-                }
-            }
-            for filter in &splitted_filter {
-                if node_info.node_id.to_string().contains(filter) {
-                    return Some(selection);
-                }
-            }
-            if let Some(extended_info) = node_info.extended_info_history.last() {
-                for filter in &splitted_filter {
-                    if extended_info.short_name.to_lowercase().contains(filter) {
-                        return Some(selection);
-                    }
-                }
-                for filter in &splitted_filter {
-                    if extended_info.long_name.to_lowercase().contains(filter) {
-                        return Some(selection);
-                    }
-                }
-            }
-            return None;
-        };
-
-        let mut filtered_nodes: Vec<(&NodeInfo, Selection)> = nodes
-            .iter()
+        let mut filtered_nodes: Vec<(&NodeInfo, Selection)> = iterator
             .map(|node_info| {
-                if let Some(selection) = is_dropped(node_info) {
-                    (Some(node_info), selection)
-                } else {
-                    (None, Selection::None)
+                let mut selection = Selection::None;
+                for roster_plugin in roster_plugins.iter_mut() {
+                    let nselection = roster_plugin.node_is_selected(node_info);
+                    if nselection != Selection::None {
+                        selection = nselection;
+                    }
+                    if roster_plugin.node_is_dropped(node_info) {
+                        return (None, Selection::None);
+                    }
                 }
+                (Some(node_info), selection)
             })
             .filter(|(node_info_or_not, _)| node_info_or_not.is_some())
-            .map(|(node_info, selection)| (*node_info.unwrap(), selection))
+            .map(|(node_info, selection)| (node_info.unwrap(), selection))
             .collect();
+
         filtered_nodes.sort_by_key(|(node_info, _)| node_info.node_id);
         filtered_nodes.sort_by_key(|(_, selection)| *selection);
 
