@@ -121,6 +121,14 @@ impl Roster {
                 .map(|(node_info, selection)| (node_info.unwrap(), selection))
                 .collect();
 
+            y_offset += Frame::new()
+                .show(ui, |ui| {
+                    ui.label(format!("nodes: {}", filtered_nodes.len()));
+                })
+                .response
+                .rect
+                .height();
+
             filtered_nodes.sort_by_key(|(node_info, _)| node_info.node_id);
             filtered_nodes.sort_by_key(|(_, selection)| *selection);
 
