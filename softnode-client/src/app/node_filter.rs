@@ -1,4 +1,4 @@
-use std::slice::Iter;
+use std::collections::{HashMap, hash_map::Values};
 
 use meshtastic_connect::keyring::{key::Key, node_id::NodeId};
 
@@ -7,7 +7,7 @@ use crate::app::{
     data::{NodeInfo, PublicKey},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum FilterVariant {
     Generic(String),
     PublicPkey(Key),
@@ -20,7 +20,12 @@ impl FilterVariant {
     pub fn matches(&self, node_info: &NodeInfo) -> bool {
         match self {
             FilterVariant::Generic(string) => {
-                if node_info.node_id.to_string().contains(string) {
+                if node_info
+                    .node_id
+                    .to_string()
+                    .to_lowercase()
+                    .contains(string)
+                {
                     return true;
                 }
             }
@@ -33,10 +38,10 @@ impl FilterVariant {
         if let Some(extended) = node_info.extended_info_history.last() {
             match self {
                 FilterVariant::Generic(string) => {
-                    if extended.short_name.contains(string) {
+                    if extended.short_name.to_lowercase().contains(string) {
                         return true;
                     }
-                    if extended.long_name.contains(string) {
+                    if extended.long_name.to_lowercase().contains(string) {
                         return true;
                     }
                 }
@@ -57,8 +62,17 @@ impl FilterVariant {
     }
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct NodeFilter {
     filter_parts: Vec<FilterVariant>,
+}
+
+impl Default for NodeFilter {
+    fn default() -> Self {
+        Self {
+            filter_parts: Vec::new(),
+        }
+    }
 }
 
 impl NodeFilter {
@@ -91,8 +105,9 @@ impl NodeFilter {
             } else if unparsed_part.starts_with("pkey:compromised") {
                 self.filter_parts.push(FilterVariant::CompromisedPkey);
             } else {
-                self.filter_parts
-                    .push(FilterVariant::Generic(unparsed_part.to_string()));
+                self.filter_parts.push(FilterVariant::Generic(
+                    unparsed_part.to_string().to_lowercase(),
+                ));
             }
         }
     }
@@ -102,25 +117,39 @@ impl NodeFilter {
     //     self.filter_parts.clone()
     // }
 
-    // Get iterator over filtered nodes
-    pub fn filter<'a>(&'a self, nodes: &'a Vec<&'a NodeInfo>) -> NodeFilterIterator<'a> {
+    // Get iterator &'a filterdes
+    pub fn filter_for<'a>(
+        &'a self,
+        nodes: &'a HashMap<NodeId, NodeInfo>,
+    ) -> NodeFilterIterator<'a> {
         NodeFilterIterator {
-            nodes: nodes.iter(),
+            nodes,
+            nodes_iterator: nodes.values(),
+
             filter: self,
         }
     }
 }
 
+#[derive(Clone)]
 pub struct NodeFilterIterator<'a> {
-    nodes: Iter<'a, &'a NodeInfo>,
+    // Direct access to NodeInfo by NodeId
+    pub nodes: &'a HashMap<NodeId, NodeInfo>,
+    nodes_iterator: Values<'a, NodeId, NodeInfo>,
     filter: &'a NodeFilter,
+}
+
+impl<'a> NodeFilterIterator<'a> {
+    pub fn matches(&self, node: &NodeInfo) -> bool {
+        self.filter.matches(node)
+    }
 }
 
 impl<'a> Iterator for NodeFilterIterator<'a> {
     type Item = &'a NodeInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(&node) = self.nodes.next() {
+        while let Some(node) = self.nodes_iterator.next() {
             if self.filter.matches(node) {
                 return Some(node);
             }

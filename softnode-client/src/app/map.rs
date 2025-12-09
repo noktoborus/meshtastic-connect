@@ -16,6 +16,7 @@ use crate::app::{
     Panel, color_generator,
     data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
     fix_gnss::{FixGnss, FixGnssLibrary, IgnoreZone, ZoneId},
+    node_filter::NodeFilterIterator,
 };
 
 pub struct MapContext {
@@ -88,7 +89,7 @@ pub struct MapPanel {
 }
 
 pub struct MapPointsPlugin<'a> {
-    nodes: &'a HashMap<NodeId, NodeInfo>,
+    node_iterator: NodeFilterIterator<'a>,
     memory: &'a mut Memory,
     fix_gnss: &'a mut FixGnssLibrary,
     color_generator: color_generator::ColorGenerator,
@@ -96,12 +97,12 @@ pub struct MapPointsPlugin<'a> {
 
 impl<'a> MapPointsPlugin<'a> {
     pub fn new(
-        nodes: &'a HashMap<NodeId, NodeInfo>,
+        node_iterator: NodeFilterIterator<'a>,
         memory: &'a mut Memory,
         fix_gnss: &'a mut FixGnssLibrary,
     ) -> Self {
         Self {
-            nodes,
+            node_iterator,
             memory,
             fix_gnss,
             color_generator: Default::default(),
@@ -188,8 +189,8 @@ impl<'a> MapPointsPlugin<'a> {
     ) -> Vec<NodeId> {
         let mut not_on_map_nodes = Vec::new();
         for (gateway_info, gateway_node_info, other_mesh_position) in self
-            .nodes
-            .values()
+            .node_iterator
+            .clone()
             .map(|node_info| {
                 node_info.gateway_for.get(&node_id).map(|gateway_info| {
                     (
@@ -235,7 +236,11 @@ impl<'a> MapPointsPlugin<'a> {
         let mut not_on_map_nodes = Vec::new();
         for (node_id, gateway_info) in gateway_node_info.gateway_for.iter() {
             let connection_color = self.color_generator.next_color();
-            if let Some(node_info) = self.nodes.get(node_id) {
+            if let Some(node_info) = self.node_iterator.nodes.get(node_id) {
+                if !self.node_iterator.matches(&node_info) {
+                    not_on_map_nodes.push(*node_id);
+                    continue;
+                }
                 let other_mesh_position =
                     fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position);
 
@@ -271,13 +276,16 @@ impl<'a> MapPointsPlugin<'a> {
         selected_is_gateway: bool,
         current_datetime: DateTime<Utc>,
     ) {
-        for (other_node_id, other_node_info) in self.nodes {
-            if *other_node_id == selected_node_info.node_id {
+        for other_node_info in self.node_iterator.clone() {
+            if other_node_info.node_id == selected_node_info.node_id {
                 continue;
             }
 
-            let mesh_position =
-                fix_or_position(&self.fix_gnss, *other_node_id, &other_node_info.position);
+            let mesh_position = fix_or_position(
+                &self.fix_gnss,
+                other_node_info.node_id,
+                &other_node_info.position,
+            );
             let assumed_position = if self.memory.display_assumed_positions {
                 other_node_info.assumed_position
             } else {
@@ -289,12 +297,13 @@ impl<'a> MapPointsPlugin<'a> {
                 let possible_gateway_info = if selected_is_gateway {
                     selected_node_info
                         .gateway_for
-                        .get(other_node_id)
+                        .get(&other_node_info.node_id)
                         .map(|v| v.last())
                         .flatten()
                 } else {
-                    self.nodes
-                        .get(other_node_id)
+                    self.node_iterator
+                        .nodes
+                        .get(&other_node_info.node_id)
                         .map(|v| {
                             v.gateway_for
                                 .get(&selected_node_info.node_id)
@@ -566,9 +575,10 @@ impl<'a> MapPointsPlugin<'a> {
         projector: &walkers::Projector,
         clicked_pos: Option<Pos2>,
     ) {
-        for (node_id, node_info) in self.nodes {
+        for node_info in self.node_iterator.clone() {
             let is_gateway = !node_info.gateway_for.is_empty();
-            let mesh_position = fix_or_position(&self.fix_gnss, *node_id, &node_info.position);
+            let mesh_position =
+                fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position);
             let assumed_position = if self.memory.display_assumed_positions {
                 node_info.assumed_position
             } else {
@@ -582,7 +592,7 @@ impl<'a> MapPointsPlugin<'a> {
                     if clicked_pos.distance(onscreen_position)
                         < symbol_size * Self::SYMBOL_SIZE_SELECT_FACTOR
                     {
-                        self.memory.selection = Some(MemorySelection::Node(*node_id));
+                        self.memory.selection = Some(MemorySelection::Node(node_info.node_id));
                         ui.ctx().request_repaint();
                         return;
                     }
@@ -644,7 +654,7 @@ impl<'a> MapPointsPlugin<'a> {
 
     fn draw_tracks(self: &mut Box<Self>, ui: &mut egui::Ui, projector: &walkers::Projector) {
         let default_tracks = Default::default();
-        for (node_id, node_info) in self.nodes {
+        for node_info in self.node_iterator.clone() {
             if node_info.position.len() < 2 {
                 continue;
             }
@@ -652,7 +662,7 @@ impl<'a> MapPointsPlugin<'a> {
             let tracks_config = self
                 .memory
                 .selected_tracks
-                .get(node_id)
+                .get(&node_info.node_id)
                 .unwrap_or(&default_tracks);
 
             let stroke = match self.memory.display_tracks {
@@ -788,7 +798,7 @@ impl<'a> MapPointsPlugin<'a> {
             );
             text.push_str(format!("center: ({:.5} {:.5})\n\n", center.x(), center.y()).as_str());
 
-            for (node_id, node_info) in self.nodes {
+            for node_info in self.node_iterator.clone() {
                 if let Some(position) = node_info.assumed_position.or(node_info
                     .position
                     .last()
@@ -813,7 +823,7 @@ impl<'a> MapPointsPlugin<'a> {
                         text.push_str(
                             format!(
                                 "{}: {}[{:.5}, {:.5}] {} {}\n",
-                                node_id,
+                                node_info.node_id,
                                 assumed_marker,
                                 position.x(),
                                 position.y(),
@@ -868,7 +878,8 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
             .selection
             .map(|selection| {
                 if let MemorySelection::Node(selected_node_id) = selection {
-                    self.nodes
+                    self.node_iterator
+                        .nodes
                         .get(&selected_node_id)
                         .map(|selected_node_info| selected_node_info)
                 } else {
@@ -896,7 +907,7 @@ impl MapPanel {
         &mut self,
         ui: &mut egui::Ui,
         map_context: &mut MapContext,
-        nodes: &HashMap<NodeId, NodeInfo>,
+        nodes_iterator: NodeFilterIterator<'a>,
         fix_gnss: &mut FixGnssLibrary,
     ) {
         if let Some(text) = self.memory.dump_data.take() {
@@ -917,7 +928,7 @@ impl MapPanel {
             return;
         }
 
-        let map_nodes = MapPointsPlugin::new(nodes, &mut self.memory, fix_gnss);
+        let map_nodes = MapPointsPlugin::new(nodes_iterator, &mut self.memory, fix_gnss);
         let map = walkers::Map::new(
             Some(&mut map_context.tiles),
             &mut self.map_memory,

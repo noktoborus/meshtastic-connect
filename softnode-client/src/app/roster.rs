@@ -1,14 +1,13 @@
 use crate::app::{
-    byte_node_id::ByteNodeId,
     data::{NodeInfo, NodeInfoExtended, PublicKey, TelemetryValue, TelemetryVariant},
-    node_filter,
+    node_filter::{self, NodeFilter, NodeFilterIterator},
     radio_telemetry::RadioTelemetry,
     settings::Settings,
     telemetry::Telemetry,
     telemetry_formatter::TelemetryFormatter,
 };
 use egui::{Button, Color32, Frame, RichText, Stroke, Vec2};
-use meshtastic_connect::keyring::{key::Key, node_id::NodeId};
+use meshtastic_connect::keyring::node_id::NodeId;
 use std::collections::HashMap;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -65,11 +64,11 @@ impl Roster {
         &mut self,
         ui: &mut egui::Ui,
         telemetry_formatter: &TelemetryFormatter,
-        mut roster_plugins: Vec<Box<dyn Plugin + 'a>>,
-        nodes: Vec<&NodeInfo>,
+        mut roster_plugins: Vec<&'a mut dyn Plugin>,
+        node_filter: &mut NodeFilter,
+        nodes: &HashMap<NodeId, NodeInfo>,
         hide_on_action: bool,
     ) -> Option<Panel> {
-        let overall_nodes = nodes.len();
         ui.horizontal(|ui| {
             egui::TextEdit::singleline(&mut self.filter)
                 .desired_width(f32::INFINITY)
@@ -81,20 +80,19 @@ impl Roster {
             roster_plugin.panel_header_ui(ui);
         }
 
-        let mut node_filter = node_filter::NodeFilter::new();
         node_filter.update_filter(self.filter.as_str());
-        let iterator = node_filter.filter(&nodes);
+        let node_iterator = node_filter.filter_for(nodes);
 
-        let mut filtered_nodes: Vec<(&NodeInfo, Selection)> = iterator
+        let mut filtered_nodes: Vec<(&NodeInfo, Selection)> = node_iterator
             .map(|node_info| {
                 let mut selection = Selection::None;
                 for roster_plugin in roster_plugins.iter_mut() {
+                    if roster_plugin.node_is_dropped(node_info) {
+                        return (None, Selection::None);
+                    }
                     let nselection = roster_plugin.node_is_selected(node_info);
                     if nselection != Selection::None {
                         selection = nselection;
-                    }
-                    if roster_plugin.node_is_dropped(node_info) {
-                        return (None, Selection::None);
                     }
                 }
                 (Some(node_info), selection)
@@ -120,15 +118,7 @@ impl Roster {
 
             y_offset += Frame::new()
                 .show(ui, |ui| {
-                    if overall_nodes != filtered_nodes.len() {
-                        ui.label(format!(
-                            "filtered nodes: {}/{}",
-                            filtered_nodes.len(),
-                            overall_nodes
-                        ));
-                    } else {
-                        ui.label(format!("nodes: {}", filtered_nodes.len()));
-                    }
+                    ui.label(format!("nodes: {}", filtered_nodes.len()));
                 })
                 .response
                 .rect
@@ -187,7 +177,7 @@ impl Roster {
         &mut self,
         ui: &mut egui::Ui,
         node_info: &NodeInfo,
-        roster_plugins: &mut Vec<Box<dyn Plugin + 'a>>,
+        roster_plugins: &mut Vec<&'a mut dyn Plugin>,
         telemetry_formatter: &TelemetryFormatter,
         selection: Selection,
     ) -> (PanelCommand, f32) {

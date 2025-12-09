@@ -27,6 +27,7 @@ use telemetry::Telemetry;
 use crate::app::data::{DataVariant, PublicKey, TelemetryValue};
 use crate::app::journal::JournalRosterPlugin;
 use crate::app::map::{MapContext, MapRosterPlugin};
+use crate::app::node_filter::NodeFilter;
 use crate::app::radio_center::assume_position;
 use crate::app::roster::{Panel, Roster};
 use crate::app::telemetry_formatter::TelemetryFormatter;
@@ -67,6 +68,7 @@ impl Default for DownloadState {
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct PersistentData {
+    pub node_filter: NodeFilter,
     pub telemetry_formatter: TelemetryFormatter,
     pub active_panel: Panel,
     pub roster: Roster,
@@ -98,6 +100,7 @@ pub struct SoftNodeApp {
 impl Default for PersistentData {
     fn default() -> Self {
         Self {
+            node_filter: NodeFilter::default(),
             telemetry_formatter: TelemetryFormatter::default(),
             active_panel: Panel::Journal,
             journal: JournalPanel::new(),
@@ -789,7 +792,7 @@ impl SoftNodeApp {
                     self.persistent.map.ui(
                         ui,
                         &mut self.map_context,
-                        &self.nodes,
+                        self.persistent.node_filter.filter_for(&self.nodes),
                         &mut self.fix_gnss,
                     )
                 });
@@ -964,18 +967,15 @@ impl eframe::App for SoftNodeApp {
         // if ctx.content_rect().width() > 400.0 {
 
         if roster.show {
-            let map_plugin = Box::new(MapRosterPlugin::new(
-                &mut self.persistent.map,
-                &mut self.fix_gnss,
-            ));
-            let journal_plugin = Box::new(JournalRosterPlugin::new(&mut self.persistent.journal));
-            let nodes_list = self.nodes.iter().map(|(_, v)| v).collect();
+            let mut map_plugin = MapRosterPlugin::new(&mut self.persistent.map, &mut self.fix_gnss);
+            let mut journal_plugin = JournalRosterPlugin::new(&mut self.persistent.journal);
             egui::SidePanel::left("Roster").show(ctx, |ui| {
                 if let Some(next_panel) = roster.ui(
                     ui,
                     &self.persistent.telemetry_formatter,
-                    vec![map_plugin, journal_plugin],
-                    nodes_list,
+                    vec![&mut map_plugin, &mut journal_plugin],
+                    &mut self.persistent.node_filter,
+                    &self.nodes,
                     hide_on_action,
                 ) {
                     self.persistent.active_panel = next_panel;

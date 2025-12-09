@@ -1,7 +1,7 @@
 use egui::{Align2, Area, Frame, Label, RichText, ScrollArea, TextWrapMode};
 use meshtastic_connect::keyring::node_id::NodeId;
 
-use crate::app::{byte_node_id::ByteNodeId, data::NodeInfo, roster};
+use crate::app::{byte_node_id::ByteNodeId, data::NodeInfo, node_filter, roster};
 
 use super::data::JournalData;
 
