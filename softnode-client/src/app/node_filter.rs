@@ -14,6 +14,11 @@ pub enum FilterVariant {
     ByteNodeId(ByteNodeId),
     NodeId(NodeId),
     CompromisedPkey,
+    IsLicensed,
+    IsUnmessagable,
+    HasTelemetry,
+    HasTracks,
+    HasPosition,
 }
 
 impl FilterVariant {
@@ -33,6 +38,21 @@ impl FilterVariant {
             FilterVariant::ByteNodeId(byte_node_id) => return *byte_node_id == node_info.node_id,
             FilterVariant::NodeId(node_id) => return *node_id == node_info.node_id,
             FilterVariant::CompromisedPkey => {}
+            FilterVariant::IsLicensed => {}
+            FilterVariant::IsUnmessagable => {}
+            FilterVariant::HasTelemetry => {
+                for telemetry in node_info.telemetry.values() {
+                    if telemetry.values.len() > 0 {
+                        return true;
+                    }
+                }
+            }
+            FilterVariant::HasTracks => {
+                return node_info.position.len() > 1;
+            }
+            FilterVariant::HasPosition => {
+                return node_info.position.len() > 0;
+            }
         }
 
         if let Some(extended) = node_info.extended_info_history.last() {
@@ -55,6 +75,15 @@ impl FilterVariant {
                 FilterVariant::CompromisedPkey => {
                     return matches!(extended.pkey, PublicKey::Compromised(_));
                 }
+                FilterVariant::IsLicensed => return extended.is_licensed,
+                FilterVariant::IsUnmessagable => {
+                    if let Some(is_unmessagable) = extended.is_unmessagable {
+                        return is_unmessagable;
+                    }
+                }
+                FilterVariant::HasTelemetry => {}
+                FilterVariant::HasTracks => {}
+                FilterVariant::HasPosition => {}
             }
         }
 
@@ -125,6 +154,13 @@ impl NodeFilter {
                 ));
             }
         }
+
+        self.filter_parts.push((FilterVariant::IsLicensed, false));
+        self.filter_parts
+            .push((FilterVariant::IsUnmessagable, false));
+        self.filter_parts.push((FilterVariant::HasTelemetry, false));
+        self.filter_parts.push((FilterVariant::HasTracks, false));
+        self.filter_parts.push((FilterVariant::HasPosition, false));
         self.filter_parts
             .push((FilterVariant::CompromisedPkey, false));
     }
@@ -149,6 +185,11 @@ impl NodeFilter {
                     FilterVariant::Generic(generic) => {
                         ui.selectable_label(*enabled, format!("{}", generic))
                     }
+                    FilterVariant::IsLicensed => ui.selectable_label(*enabled, "Licensed"),
+                    FilterVariant::IsUnmessagable => ui.selectable_label(*enabled, "Unmessagable"),
+                    FilterVariant::HasTelemetry => ui.selectable_label(*enabled, "Telemetry"),
+                    FilterVariant::HasTracks => ui.selectable_label(*enabled, "Tracks"),
+                    FilterVariant::HasPosition => ui.selectable_label(*enabled, "Position"),
                 }
                 .clicked()
                 .then(|| {
