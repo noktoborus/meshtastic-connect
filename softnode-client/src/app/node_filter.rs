@@ -64,28 +64,30 @@ impl FilterVariant {
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct NodeFilter {
-    filter_parts: Vec<FilterVariant>,
+    filter_parts: Vec<(FilterVariant, bool)>,
+    filter_origin: Option<String>,
 }
 
 impl Default for NodeFilter {
     fn default() -> Self {
         Self {
             filter_parts: Vec::new(),
+            filter_origin: None,
         }
     }
 }
 
 impl NodeFilter {
     pub fn new() -> Self {
-        Self {
-            filter_parts: Vec::new(),
-        }
+        Default::default()
     }
 
     pub fn matches(&self, node: &NodeInfo) -> bool {
-        for filter_part in &self.filter_parts {
-            if !filter_part.matches(node) {
-                return false;
+        for (filter_part, enabled) in &self.filter_parts {
+            if *enabled {
+                if !filter_part.matches(node) {
+                    return false;
+                }
             }
         }
         true
@@ -93,29 +95,68 @@ impl NodeFilter {
 
     // Set new filter's string and parse to filter parts
     pub fn update_filter(&mut self, filter: &str) {
+        if let Some(ref origin) = self.filter_origin {
+            if origin == filter {
+                return;
+            }
+        }
+        self.filter_origin = Some(filter.to_string());
         self.filter_parts.clear();
         for unparsed_part in filter.split_whitespace() {
             if let Ok(pkey) = Key::try_from(unparsed_part) {
-                self.filter_parts.push(FilterVariant::PublicPkey(pkey));
-            } else if let Ok(node_id) = NodeId::try_from(unparsed_part) {
-                self.filter_parts.push(FilterVariant::NodeId(node_id));
-            } else if let Ok(byte_node_id) = ByteNodeId::try_from(unparsed_part) {
                 self.filter_parts
-                    .push(FilterVariant::ByteNodeId(byte_node_id));
-            } else if unparsed_part.starts_with("pkey:compromised") {
-                self.filter_parts.push(FilterVariant::CompromisedPkey);
+                    .push((FilterVariant::PublicPkey(pkey), true));
+            } else if unparsed_part.starts_with("!*")
+                && unparsed_part.len() <= 2 + 2 /* means: '!*' + '<2 bytes of node id's hex>' */
+                && let Ok(byte_node_id) = ByteNodeId::try_from(&unparsed_part[2..])
+            {
+                self.filter_parts
+                    .push((FilterVariant::ByteNodeId(byte_node_id), true));
+            } else if unparsed_part.starts_with("!")
+                && unparsed_part.len() <= 8 + 1 /* means: '!' + '<8 bytes of node id>' */
+                && let Ok(node_id) = NodeId::try_from(&unparsed_part[1..])
+            {
+                self.filter_parts
+                    .push((FilterVariant::NodeId(node_id), true));
             } else {
-                self.filter_parts.push(FilterVariant::Generic(
-                    unparsed_part.to_string().to_lowercase(),
+                self.filter_parts.push((
+                    FilterVariant::Generic(unparsed_part.to_string().to_lowercase()),
+                    true,
                 ));
             }
         }
+        self.filter_parts
+            .push((FilterVariant::CompromisedPkey, false));
     }
 
-    // // Get parsed filter parts
-    // pub fn filter_parts(&self) -> Vec<FilterVariant> {
-    //     self.filter_parts.clone()
-    // }
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("🔍");
+            for (filter_part, enabled) in self.filter_parts.iter_mut() {
+                match filter_part {
+                    FilterVariant::PublicPkey(pkey) => {
+                        ui.selectable_label(*enabled, format!("pkey:{}", pkey))
+                    }
+                    FilterVariant::NodeId(node_id) => {
+                        ui.selectable_label(*enabled, format!("nid:{}", node_id))
+                    }
+                    FilterVariant::ByteNodeId(byte_node_id) => {
+                        ui.selectable_label(*enabled, format!("rnid:{}", byte_node_id))
+                    }
+                    FilterVariant::CompromisedPkey => {
+                        ui.selectable_label(*enabled, "Compromised PKey")
+                    }
+                    FilterVariant::Generic(generic) => {
+                        ui.selectable_label(*enabled, format!("{}", generic))
+                    }
+                }
+                .clicked()
+                .then(|| {
+                    *enabled = !*enabled;
+                });
+            }
+        });
+    }
 
     // Get iterator &'a filterdes
     pub fn filter_for<'a>(

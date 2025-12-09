@@ -81,28 +81,6 @@ impl Roster {
         }
 
         node_filter.update_filter(self.filter.as_str());
-        let node_iterator = node_filter.filter_for(nodes);
-
-        let mut filtered_nodes: Vec<(&NodeInfo, Selection)> = node_iterator
-            .map(|node_info| {
-                let mut selection = Selection::None;
-                for roster_plugin in roster_plugins.iter_mut() {
-                    if roster_plugin.node_is_dropped(node_info) {
-                        return (None, Selection::None);
-                    }
-                    let nselection = roster_plugin.node_is_selected(node_info);
-                    if nselection != Selection::None {
-                        selection = nselection;
-                    }
-                }
-                (Some(node_info), selection)
-            })
-            .filter(|(node_info_or_not, _)| node_info_or_not.is_some())
-            .map(|(node_info, selection)| (node_info.unwrap(), selection))
-            .collect();
-
-        filtered_nodes.sort_by_key(|(node_info, _)| node_info.node_id);
-        filtered_nodes.sort_by_key(|(_, selection)| *selection);
 
         let scroll_area = egui::ScrollArea::vertical().auto_shrink(false);
         let scroll_area = if self.filter.is_empty() {
@@ -118,11 +96,33 @@ impl Roster {
 
             y_offset += Frame::new()
                 .show(ui, |ui| {
-                    ui.label(format!("nodes: {}", filtered_nodes.len()));
+                    node_filter.ui(ui);
                 })
                 .response
                 .rect
                 .height();
+
+            let mut filtered_nodes: Vec<(&NodeInfo, Selection)> = node_filter
+                .filter_for(nodes)
+                .map(|node_info| {
+                    let mut selection = Selection::None;
+                    for roster_plugin in roster_plugins.iter_mut() {
+                        if roster_plugin.node_is_dropped(node_info) {
+                            return (None, Selection::None);
+                        }
+                        let nselection = roster_plugin.node_is_selected(node_info);
+                        if nselection != Selection::None {
+                            selection = nselection;
+                        }
+                    }
+                    (Some(node_info), selection)
+                })
+                .filter(|(node_info_or_not, _)| node_info_or_not.is_some())
+                .map(|(node_info, selection)| (node_info.unwrap(), selection))
+                .collect();
+
+            filtered_nodes.sort_by_key(|(node_info, _)| node_info.node_id);
+            filtered_nodes.sort_by_key(|(_, selection)| *selection);
 
             for (index, (node_info, selection)) in filtered_nodes.iter().enumerate() {
                 let probably_height = *self
