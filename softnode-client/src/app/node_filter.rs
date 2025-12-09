@@ -33,6 +33,7 @@ impl FilterVariant {
                 {
                     return true;
                 }
+                return false;
             }
             FilterVariant::PublicPkey(_key) => {}
             FilterVariant::ByteNodeId(byte_node_id) => return *byte_node_id == node_info.node_id,
@@ -46,6 +47,7 @@ impl FilterVariant {
                         return true;
                     }
                 }
+                return false;
             }
             FilterVariant::HasTracks => {
                 return node_info.position.len() > 1;
@@ -58,12 +60,8 @@ impl FilterVariant {
         if let Some(extended) = node_info.extended_info_history.last() {
             match self {
                 FilterVariant::Generic(string) => {
-                    if extended.short_name.to_lowercase().contains(string) {
-                        return true;
-                    }
-                    if extended.long_name.to_lowercase().contains(string) {
-                        return true;
-                    }
+                    return extended.short_name.to_lowercase().contains(string)
+                        || extended.long_name.to_lowercase().contains(string);
                 }
                 FilterVariant::PublicPkey(key) => match extended.pkey {
                     PublicKey::None => return false,
@@ -77,9 +75,7 @@ impl FilterVariant {
                 }
                 FilterVariant::IsLicensed => return extended.is_licensed,
                 FilterVariant::IsUnmessagable => {
-                    if let Some(is_unmessagable) = extended.is_unmessagable {
-                        return is_unmessagable;
-                    }
+                    return Some(true) == extended.is_unmessagable;
                 }
                 FilterVariant::HasTelemetry => {}
                 FilterVariant::HasTracks => {}
