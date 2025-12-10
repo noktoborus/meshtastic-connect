@@ -4,12 +4,9 @@ use chrono::{DateTime, Utc};
 use egui::{Align2, Button, Color32, Context, FontId, Pos2, Rect, Vec2};
 use geo::{Distance, Haversine};
 use meshtastic_connect::keyring::node_id::NodeId;
-use walkers::{
-    HttpTiles, MapMemory,
-    extras::{LabeledSymbol, LabeledSymbolStyle, Place, Symbol},
-    lon_lat,
-    sources::OpenStreetMap,
-};
+use walkers::{HttpTiles, MapMemory, lon_lat, sources::OpenStreetMap};
+use walkers_extras::Place;
+use walkers_extras::{LabeledSymbol, LabeledSymbolStyle, Symbol};
 
 use crate::app::{
     Panel, color_generator,
