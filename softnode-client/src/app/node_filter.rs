@@ -101,7 +101,7 @@ impl FilterVariant {
                 {
                     return true;
                 }
-                return false;
+                /* drop down to check extended info */
             }
             FilterVariant::PublicPkey(_key) => {}
             FilterVariant::ByteNodeId(byte_node_id) => return *byte_node_id == node_info.node_id,
