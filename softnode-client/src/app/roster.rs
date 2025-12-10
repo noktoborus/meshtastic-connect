@@ -20,6 +20,7 @@ pub enum Panel {
     GatewayByRSSI(NodeId, RadioTelemetry),
     GatewayByHops(NodeId, RadioTelemetry),
     Map,
+    NodeDump,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -123,7 +124,16 @@ impl Roster {
 
             y_offset += Frame::new()
                 .show(ui, |ui| {
-                    ui.label(format!("nodes: {}", filtered_nodes.len()));
+                    ui.horizontal(|ui| {
+                        ui.label(format!("nodes: {}", filtered_nodes.len()));
+                        if ui.button("as text").clicked() {
+                            next_page = Some(Panel::NodeDump);
+                            if hide_on_action {
+                                self.show = false;
+                            }
+                            ui.ctx().request_repaint();
+                        };
+                    });
                 })
                 .response
                 .rect

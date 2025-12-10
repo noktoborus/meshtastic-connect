@@ -10,6 +10,7 @@ mod telemetry_formatter;
 use std::{collections::HashMap, f32, ops::ControlFlow, sync::Arc};
 pub mod color_generator;
 pub mod fix_gnss;
+mod node_dump;
 pub mod radio_center;
 mod roster;
 
@@ -21,6 +22,7 @@ use fix_gnss::FixGnssLibrary;
 use journal::JournalPanel;
 use map::MapPanel;
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
+use node_dump::NodeDump;
 use settings::Settings;
 use telemetry::Telemetry;
 
@@ -74,6 +76,7 @@ pub struct PersistentData {
     pub roster: Roster,
     pub journal: JournalPanel,
     pub map: MapPanel,
+    pub node_dump: NodeDump,
     pub update_interval_secs: std::time::Duration,
 }
 
@@ -106,6 +109,7 @@ impl Default for PersistentData {
             journal: JournalPanel::new(),
             roster: Default::default(),
             map: Default::default(),
+            node_dump: NodeDump::new(),
             update_interval_secs: std::time::Duration::from_secs(5),
         }
     }
@@ -859,6 +863,15 @@ impl SoftNodeApp {
                     });
                 }
             }
+            Panel::NodeDump => {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.persistent.node_dump.ui(
+                        ui,
+                        self.persistent.node_filter.filter_for(&self.nodes),
+                        &self.fix_gnss,
+                    )
+                });
+            }
         };
     }
 }
@@ -914,6 +927,7 @@ impl eframe::App for SoftNodeApp {
                                 Panel::GatewayByHops(node_id, _) => {
                                     format!("Income hops ({})", node_id)
                                 }
+                                Panel::NodeDump => format!("Text"),
                             };
 
                             ui.menu_button(menu_text, |ui| {

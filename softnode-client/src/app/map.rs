@@ -77,8 +77,6 @@ pub struct Memory {
     hide_labels: bool,
     selected_tracks: HashMap<NodeId, TracksConfig>,
     bounding_box: Option<[walkers::Position; 2]>,
-
-    dump_data: Option<String>,
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
@@ -769,81 +767,10 @@ impl<'a> MapPointsPlugin<'a> {
 
     fn buttons(
         self: &mut Box<Self>,
-        ui: &mut egui::Ui,
-        response: &egui::Response,
-        projector: &walkers::Projector,
+        _ui: &mut egui::Ui,
+        _response: &egui::Response,
+        _projector: &walkers::Projector,
     ) {
-        let buttons_position = Pos2::new(response.rect.width(), response.rect.height());
-        if ui
-            .put(
-                Rect::from_center_size(buttons_position, Vec2::new(60., 20.)),
-                Button::new("Dump nodes"),
-            )
-            .clicked()
-        {
-            let mut text = String::new();
-            let p1 = projector.unproject(response.rect.max.to_vec2());
-            let p2 = projector.unproject(response.rect.min.to_vec2());
-            let center = projector.unproject(response.rect.center().to_vec2());
-            text.push_str(
-                format!(
-                    "bounds: ({:.5} {:.5}) - ({:.5} {:.5})\n",
-                    p1.x(),
-                    p1.y(),
-                    p2.x(),
-                    p2.y()
-                )
-                .as_str(),
-            );
-            text.push_str(format!("center: ({:.5} {:.5})\n\n", center.x(), center.y()).as_str());
-
-            for node_info in self.node_iterator.clone() {
-                if let Some(position) = node_info.assumed_position.or(node_info
-                    .position
-                    .last()
-                    .map(|v| lon_lat(v.longitude, v.latitude)))
-                {
-                    if position.x() < p1.x()
-                        && position.y() > p1.y()
-                        && position.x() > p2.x()
-                        && position.y() < p2.y()
-                    {
-                        let assumed_marker = if node_info.position.last().is_none() {
-                            "?"
-                        } else {
-                            " "
-                        };
-                        let gateway_marker = if !node_info.gateway_for.is_empty() {
-                            "is_gateway"
-                        } else {
-                            ""
-                        };
-
-                        text.push_str(
-                            format!(
-                                "{}: {}[{:.5}, {:.5}] {} {}\n",
-                                node_info.node_id,
-                                assumed_marker,
-                                position.x(),
-                                position.y(),
-                                node_info
-                                    .extended_info_history
-                                    .last()
-                                    .map(|v| format!(
-                                        "{} ({})",
-                                        v.short_name.clone(),
-                                        v.long_name.clone()
-                                    ))
-                                    .unwrap_or_default(),
-                                gateway_marker
-                            )
-                            .as_str(),
-                        );
-                    }
-                }
-            }
-            self.memory.dump_data = Some(text.into());
-        };
     }
 }
 
@@ -910,24 +837,6 @@ impl MapPanel {
         nodes: &HashMap<NodeId, NodeInfo>,
         fix_gnss: &mut FixGnssLibrary,
     ) {
-        if let Some(text) = self.memory.dump_data.take() {
-            egui::Frame::new().inner_margin(5.0).show(ui, |ui| {
-                egui::ScrollArea::both().auto_shrink(true).show(ui, |ui| {
-                    if ui.button("📋 Copy").clicked() {
-                        ui.ctx().copy_text(text.clone());
-                    }
-                    if !ui.button("Close").clicked() {
-                        ui.label(egui::RichText::new(&text).monospace());
-                        self.memory.dump_data = Some(text);
-                    }
-                });
-            });
-        }
-
-        if self.memory.dump_data.is_some() {
-            return;
-        }
-
         {
             let node_iterator = node_filter.filter_for(nodes);
             let map_nodes = MapPointsPlugin::new(node_iterator, &mut self.memory, fix_gnss);
