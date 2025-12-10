@@ -266,12 +266,12 @@ impl NodeFilter {
                 (
                     StaticFilterVariant::HasEnvironmentTelemetry,
                     RichText::new("Environment"),
-                    "Node has environment telemetry",
+                    "Node has environment telemetry like temperature, humidity, etc.",
                 ),
                 (
                     StaticFilterVariant::HasDeviceTelemetry,
                     RichText::new("Device's Telemetry"),
-                    "Node has environment telemetry",
+                    "Node has device telemetry like channel util, battery level, etc.",
                 ),
                 (
                     StaticFilterVariant::HasTracks,
