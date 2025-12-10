@@ -11,13 +11,13 @@ use walkers::{
     sources::OpenStreetMap,
 };
 
-use crate::app::roster;
 use crate::app::{
     Panel, color_generator,
     data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
     fix_gnss::{FixGnss, FixGnssLibrary, IgnoreZone, ZoneId},
     node_filter::NodeFilterIterator,
 };
+use crate::app::{node_filter::NodeFilter, roster};
 
 pub struct MapContext {
     tiles: HttpTiles,
@@ -76,8 +76,7 @@ pub struct Memory {
     display_tracks: DisplayTracks,
     hide_labels: bool,
     selected_tracks: HashMap<NodeId, TracksConfig>,
-    boundary_box: Option<[walkers::Position; 2]>,
-    filter_by_visible_area: bool,
+    bounding_box: Option<[walkers::Position; 2]>,
 
     dump_data: Option<String>,
 }
@@ -858,7 +857,7 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
         projector: &walkers::Projector,
         map_memory: &MapMemory,
     ) {
-        self.memory.boundary_box = Some([
+        self.memory.bounding_box = Some([
             projector.unproject(response.rect.max.to_vec2()),
             projector.unproject(response.rect.min.to_vec2()),
         ]);
@@ -907,7 +906,8 @@ impl MapPanel {
         &mut self,
         ui: &mut egui::Ui,
         map_context: &mut MapContext,
-        nodes_iterator: NodeFilterIterator<'a>,
+        node_filter: &mut NodeFilter,
+        nodes: &HashMap<NodeId, NodeInfo>,
         fix_gnss: &mut FixGnssLibrary,
     ) {
         if let Some(text) = self.memory.dump_data.take() {
@@ -928,15 +928,21 @@ impl MapPanel {
             return;
         }
 
-        let map_nodes = MapPointsPlugin::new(nodes_iterator, &mut self.memory, fix_gnss);
-        let map = walkers::Map::new(
-            Some(&mut map_context.tiles),
-            &mut self.map_memory,
-            lon_lat(17.03664, 51.09916),
-        )
-        .with_plugin(map_nodes);
+        {
+            let node_iterator = node_filter.filter_for(nodes);
+            let map_nodes = MapPointsPlugin::new(node_iterator, &mut self.memory, fix_gnss);
+            let map = walkers::Map::new(
+                Some(&mut map_context.tiles),
+                &mut self.map_memory,
+                lon_lat(17.03664, 51.09916),
+            )
+            .with_plugin(map_nodes);
+            ui.add(map);
+        }
 
-        ui.add(map);
+        if let Some(bbox) = self.memory.bounding_box {
+            node_filter.set_bbox(bbox);
+        }
     }
 }
 
@@ -1002,31 +1008,6 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
     }
 
     fn node_is_dropped(&self, node_info: &NodeInfo) -> bool {
-        if self.map.memory.filter_by_visible_area {
-            if let (Some(bbox), Some(position)) = (
-                self.map.memory.boundary_box,
-                node_info.assumed_position.or(node_info
-                    .position
-                    .last()
-                    .map(|v| lon_lat(v.longitude, v.latitude))),
-            ) {
-                let p1 = bbox[0];
-                let p2 = bbox[1];
-
-                if position.x() < p1.x()
-                    && position.y() > p1.y()
-                    && position.x() > p2.x()
-                    && position.y() < p2.y()
-                {
-                    // no drop
-                } else {
-                    return true;
-                }
-            } else {
-                return true;
-            }
-        }
-
         if let Some(MemorySelection::Node(node_id)) = self.map.memory.selection {
             if node_id == node_info.node_id {
                 return false;
@@ -1041,10 +1022,6 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
 
     fn panel_header_ui(self: &mut Self, ui: &mut egui::Ui) -> roster::PanelCommand {
         ui.collapsing("Map settings", |ui| {
-            ui.checkbox(
-                &mut self.map.memory.filter_by_visible_area,
-                "Filter roster by visible area",
-            );
             egui::ComboBox::from_label("gateway connections")
                 .selected_text(self.map.memory.gateway_connections.to_string())
                 .show_ui(ui, |ui| {

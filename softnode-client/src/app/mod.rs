@@ -792,7 +792,8 @@ impl SoftNodeApp {
                     self.persistent.map.ui(
                         ui,
                         &mut self.map_context,
-                        self.persistent.node_filter.filter_for(&self.nodes),
+                        &mut self.persistent.node_filter,
+                        &self.nodes,
                         &mut self.fix_gnss,
                     )
                 });
