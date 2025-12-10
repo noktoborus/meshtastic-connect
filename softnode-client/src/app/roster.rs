@@ -1,6 +1,6 @@
 use crate::app::{
     data::{NodeInfo, NodeInfoExtended, PublicKey, TelemetryValue, TelemetryVariant},
-    node_filter::{self, NodeFilter, NodeFilterIterator},
+    node_filter::NodeFilter,
     radio_telemetry::RadioTelemetry,
     settings::Settings,
     telemetry::Telemetry,
