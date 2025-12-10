@@ -6,7 +6,7 @@ use walkers::{lat_lon, lon_lat};
 
 use crate::app::{
     byte_node_id::ByteNodeId,
-    data::{NodeInfo, PublicKey},
+    data::{NodeInfo, PublicKey, TelemetryVariant},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -22,7 +22,8 @@ enum StaticFilterVariant {
     CompromisedPkey,
     IsLicensed,
     IsUnmessagable,
-    HasTelemetry,
+    HasEnvironmentTelemetry,
+    HasDeviceTelemetry,
     HasTracks,
     HasPosition,
     BoundingBox,
@@ -30,12 +31,21 @@ enum StaticFilterVariant {
 
 impl StaticFilterVariant {
     pub fn matches(&self, bbox: &[walkers::Position; 2], node_info: &NodeInfo) -> bool {
+        let device_telemetry = [
+            TelemetryVariant::BatteryLevel,
+            TelemetryVariant::AirUtilTx,
+            TelemetryVariant::ChannelUtilization,
+            TelemetryVariant::Voltage,
+        ];
         match self {
             StaticFilterVariant::CompromisedPkey => {}
             StaticFilterVariant::IsLicensed => {}
             StaticFilterVariant::IsUnmessagable => {}
-            StaticFilterVariant::HasTelemetry => {
-                for telemetry in node_info.telemetry.values() {
+            StaticFilterVariant::HasEnvironmentTelemetry => {
+                for (variant, telemetry) in node_info.telemetry.iter() {
+                    if device_telemetry.contains(variant) {
+                        continue;
+                    }
                     if telemetry.values.len() > 0 {
                         return true;
                     }
@@ -67,6 +77,14 @@ impl StaticFilterVariant {
                 }
                 return false;
             }
+            StaticFilterVariant::HasDeviceTelemetry => {
+                for (variant, telemetry) in node_info.telemetry.iter() {
+                    if device_telemetry.contains(variant) && telemetry.values.len() > 0 {
+                        return true;
+                    }
+                }
+                return false;
+            }
         }
 
         if let Some(extended) = node_info.extended_info_history.last() {
@@ -78,10 +96,11 @@ impl StaticFilterVariant {
                 StaticFilterVariant::IsUnmessagable => {
                     return Some(true) == extended.is_unmessagable;
                 }
-                StaticFilterVariant::HasTelemetry => {}
+                StaticFilterVariant::HasEnvironmentTelemetry => {}
                 StaticFilterVariant::HasTracks => {}
                 StaticFilterVariant::HasPosition => {}
                 StaticFilterVariant::BoundingBox => {}
+                StaticFilterVariant::HasDeviceTelemetry => {}
             }
         }
 
@@ -245,9 +264,14 @@ impl NodeFilter {
                     "Filter by `unmessagable` flag",
                 ),
                 (
-                    StaticFilterVariant::HasTelemetry,
-                    RichText::new("Telemetry"),
-                    "Node has telemetry",
+                    StaticFilterVariant::HasEnvironmentTelemetry,
+                    RichText::new("Environment"),
+                    "Node has environment telemetry",
+                ),
+                (
+                    StaticFilterVariant::HasDeviceTelemetry,
+                    RichText::new("Device's Telemetry"),
+                    "Node has environment telemetry",
                 ),
                 (
                     StaticFilterVariant::HasTracks,
