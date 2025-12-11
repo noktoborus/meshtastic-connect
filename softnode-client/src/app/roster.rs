@@ -5,8 +5,9 @@ use crate::app::{
     settings::Settings,
     telemetry::Telemetry,
     telemetry_formatter::TelemetryFormatter,
+    time_format::format_timediff,
 };
-use egui::{Button, Color32, Frame, RichText, Stroke, Vec2};
+use egui::{Align, Button, Color32, Frame, Layout, RichText, Stroke, Vec2};
 use meshtastic_connect::keyring::node_id::NodeId;
 use std::collections::HashMap;
 
@@ -199,6 +200,18 @@ impl Roster {
         telemetry_formatter: &TelemetryFormatter,
         selection: Selection,
     ) -> (PanelCommand, f32) {
+        let current_datetime = chrono::Utc::now();
+        let label_last_seen = |ui: &mut egui::Ui| {
+            if let Some(label) = node_info
+                .packet_statistics
+                .last()
+                .map(|v| format_timediff(v.timestamp, current_datetime))
+                .flatten()
+            {
+                ui.label(label).on_hover_text("Last seen");
+            }
+        };
+
         let show_extended = |ui: &mut egui::Ui, extended: &NodeInfoExtended, is_via_mqtt: bool| {
             let node_id_str = node_info.node_id.to_string();
             ui.horizontal(|ui| {
@@ -269,6 +282,9 @@ impl Roster {
                     ui.selectable_label(false, RichText::new(node_id_str.clone()).color(Color32::LIGHT_RED))
                         .on_hover_text(format!("NodeID is {} but announced id is {}", node_id_str, extended.announced_node_id))
                 }.clicked().then(|| ui.ctx().copy_text(node_info.node_id.into()));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    label_last_seen(ui);
+                });
             });
         };
 
@@ -286,13 +302,18 @@ impl Roster {
                         ui.label(RichText::new("").color(Color32::LIGHT_GRAY))
                             .on_hover_text("Some packets hearrd via MQTT");
                     }
-                    if ui
-                        .selectable_label(false, node_info.node_id.to_string())
-                        .on_hover_text("No NodeInfo announced")
-                        .clicked()
-                    {
-                        ui.ctx().copy_text(node_info.node_id.into());
-                    };
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(false, node_info.node_id.to_string())
+                            .on_hover_text("No NodeInfo announced")
+                            .clicked()
+                        {
+                            ui.ctx().copy_text(node_info.node_id.into());
+                        };
+                        ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                            label_last_seen(ui);
+                        });
+                    });
                 }
             });
             ui.add_space(5.0);

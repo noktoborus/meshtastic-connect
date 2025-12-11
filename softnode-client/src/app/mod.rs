@@ -13,6 +13,7 @@ pub mod fix_gnss;
 mod node_dump;
 pub mod radio_center;
 mod roster;
+mod time_format;
 
 use chrono::{DateTime, Utc};
 use data::{JournalData, NodeInfo, StoredMeshPacket};

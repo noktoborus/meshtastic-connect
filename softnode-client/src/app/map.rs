@@ -8,6 +8,7 @@ use walkers::{HttpTiles, MapMemory, lon_lat, sources::OpenStreetMap};
 use walkers_extras::Place;
 use walkers_extras::{LabeledSymbol, LabeledSymbolStyle, Symbol};
 
+use crate::app::time_format::format_timediff;
 use crate::app::{
     Panel, color_generator,
     data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
@@ -117,21 +118,6 @@ fn fix_or_position(
                 .last()
                 .map(|pos| lon_lat(pos.longitude, pos.latitude))
         })
-}
-
-fn format_timediff(timestamp: DateTime<Utc>, current_datetime: DateTime<Utc>) -> Option<String> {
-    if timestamp < current_datetime {
-        let timediff = current_datetime - timestamp;
-        if timediff.num_hours() > 1 {
-            Some(format!("{} hours ago", timediff.num_hours()))
-        } else if timediff.num_minutes() > 1 {
-            Some(format!("{} minutes ago", timediff.num_minutes()))
-        } else {
-            Some(format!("{} seconds ago", timediff.num_seconds()))
-        }
-    } else {
-        None
-    }
 }
 
 fn get_telemetry_label(node_info: &NodeInfo) -> String {
