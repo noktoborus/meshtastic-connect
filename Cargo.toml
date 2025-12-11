@@ -39,7 +39,7 @@ x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
 zerocopy = { version = "0.8.27", features = ["derive"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.3.4", features = ["wasm_js"] }
+getrandom = { version = "0.3.3", features = ["wasm_js"] }
 
 [dev-dependencies]
 serde_yaml_ng = "0.10.0"
