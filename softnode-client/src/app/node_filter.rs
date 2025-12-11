@@ -45,7 +45,12 @@ enum StaticFilterVariant {
 }
 
 impl StaticFilterVariant {
-    pub fn matches(&self, bbox: &[walkers::Position; 2], node_info: &NodeInfo) -> bool {
+    pub fn matches(
+        &self,
+        bbox: &[walkers::Position; 2],
+        node_info: &NodeInfo,
+        ignore_extended: bool,
+    ) -> bool {
         let device_telemetry = [
             TelemetryVariant::BatteryLevel,
             TelemetryVariant::AirUtilTx,
@@ -113,6 +118,10 @@ impl StaticFilterVariant {
             StaticFilterVariant::IsGateway => {
                 return node_info.gateway_for.len() != 0;
             }
+        }
+
+        if ignore_extended {
+            return true;
         }
 
         if let Some(extended) = node_info.extended_info_history.last() {
@@ -185,7 +194,16 @@ impl FilterVariant {
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
+enum KnownNodesFilter {
+    Unspecified,
+    Known,
+    Unknown,
+    // Favorite
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct NodeFilter {
+    known_nodes_filter: KnownNodesFilter,
     filter_parts: Vec<(FilterVariant, bool)>,
     static_filter: HashSet<StaticFilterVariant>,
     filter_origin: Option<String>,
@@ -196,6 +214,7 @@ pub struct NodeFilter {
 impl Default for NodeFilter {
     fn default() -> Self {
         Self {
+            known_nodes_filter: KnownNodesFilter::Unspecified,
             filter_parts: Vec::new(),
             static_filter: HashSet::new(),
             filter_origin: None,
@@ -210,6 +229,22 @@ impl NodeFilter {
     }
 
     pub fn matches(&self, node: &NodeInfo) -> bool {
+        let ignore_extended = match self.known_nodes_filter {
+            KnownNodesFilter::Unspecified => false,
+            KnownNodesFilter::Known => {
+                if node.extended_info_history.is_empty() {
+                    return false;
+                }
+                false
+            }
+            KnownNodesFilter::Unknown => {
+                if !node.extended_info_history.is_empty() {
+                    return false;
+                }
+                true
+            }
+        };
+
         for (filter_part, enabled) in &self.filter_parts {
             if *enabled {
                 if !filter_part.matches(node) {
@@ -219,7 +254,7 @@ impl NodeFilter {
         }
 
         for static_filter in &self.static_filter {
-            if !static_filter.matches(&self.bbox, node) {
+            if !static_filter.matches(&self.bbox, node, ignore_extended) {
                 return false;
             }
         }
@@ -291,27 +326,40 @@ impl NodeFilter {
             }
         });
         ui.horizontal_wrapped(|ui| {
-            let static_filters_vary = [
-                vec![
-                    (None, Arc::new(RichText::new("🔒")), "Filter by public key"),
-                    (
-                        Some(StaticFilterVariant::PublicKey(
-                            PublicKeyVariant::Compromised,
-                        )),
-                        Arc::new(RichText::new("🔒").color(Color32::YELLOW)),
-                        "Filtered by compromised public key",
-                    ),
-                    (
-                        Some(StaticFilterVariant::PublicKey(PublicKeyVariant::Valid)),
-                        Arc::new(RichText::new("🔒").color(Color32::LIGHT_GREEN)),
-                        "Filtered by valid public key",
-                    ),
-                    (
-                        Some(StaticFilterVariant::PublicKey(PublicKeyVariant::None)),
-                        Arc::new(RichText::new("🔓").color(Color32::LIGHT_RED)),
-                        "Show nodes with no public key",
-                    ),
-                ],
+            let show_extended = match self.known_nodes_filter {
+                KnownNodesFilter::Unspecified => {
+                    if ui
+                        .selectable_label(false, RichText::new("☆"))
+                        .on_hover_text("Switch on filter by known nodes")
+                        .clicked()
+                    {
+                        self.known_nodes_filter = KnownNodesFilter::Known;
+                    }
+                    true
+                }
+                KnownNodesFilter::Known => {
+                    if ui
+                        .selectable_label(true, RichText::new("☆").color(Color32::LIGHT_GREEN))
+                        .on_hover_text("Filter only by known nodes: node info is received")
+                        .clicked()
+                    {
+                        self.known_nodes_filter = KnownNodesFilter::Unknown;
+                    }
+                    true
+                }
+                KnownNodesFilter::Unknown => {
+                    if ui
+                        .selectable_label(true, RichText::new("☆").color(Color32::LIGHT_RED))
+                        .on_hover_text("Show only if no node info received")
+                        .clicked()
+                    {
+                        self.known_nodes_filter = KnownNodesFilter::Unspecified;
+                    }
+                    false
+                }
+            };
+
+            let mut static_filters_vary = vec![
                 vec![
                     (
                         None,
@@ -361,36 +409,62 @@ impl NodeFilter {
                         "Node has no position",
                     ),
                 ],
-                vec![
-                    (
-                        None,
-                        Arc::new(RichText::new("🖹")),
-                        "Switch on by `is_licensed` flag",
-                    ),
-                    (
-                        Some(StaticFilterVariant::IsLicensed(true)),
-                        Arc::new(RichText::new("🖹").color(Color32::LIGHT_BLUE)),
-                        "Search with enabled `is_licensed` flag",
-                    ),
-                    (
-                        Some(StaticFilterVariant::IsLicensed(false)),
-                        Arc::new(RichText::new("🖹").color(Color32::LIGHT_RED)),
-                        "Show only node without `is_licensed` flag",
-                    ),
-                ],
-                vec![
-                    (
-                        None,
-                        Arc::new(RichText::new("🚫")),
-                        "Enable filter by `is_unmessagable` flag",
-                    ),
-                    (
-                        Some(StaticFilterVariant::IsUnmessagable),
-                        Arc::new(RichText::new("🚫").color(Color32::LIGHT_RED)),
-                        "Show only if `is_unmessagable` is set",
-                    ),
-                ],
             ];
+
+            if show_extended {
+                let mut extended_filters = vec![
+                    vec![
+                        (None, Arc::new(RichText::new("🔒")), "Filter by public key"),
+                        (
+                            Some(StaticFilterVariant::PublicKey(
+                                PublicKeyVariant::Compromised,
+                            )),
+                            Arc::new(RichText::new("🔒").color(Color32::YELLOW)),
+                            "Filtered by compromised public key",
+                        ),
+                        (
+                            Some(StaticFilterVariant::PublicKey(PublicKeyVariant::Valid)),
+                            Arc::new(RichText::new("🔒").color(Color32::LIGHT_GREEN)),
+                            "Filtered by valid public key",
+                        ),
+                        (
+                            Some(StaticFilterVariant::PublicKey(PublicKeyVariant::None)),
+                            Arc::new(RichText::new("🔓").color(Color32::LIGHT_RED)),
+                            "Show nodes with no public key",
+                        ),
+                    ],
+                    vec![
+                        (
+                            None,
+                            Arc::new(RichText::new("🖹")),
+                            "Switch on by `is_licensed` flag",
+                        ),
+                        (
+                            Some(StaticFilterVariant::IsLicensed(true)),
+                            Arc::new(RichText::new("🖹").color(Color32::LIGHT_BLUE)),
+                            "Search with enabled `is_licensed` flag",
+                        ),
+                        (
+                            Some(StaticFilterVariant::IsLicensed(false)),
+                            Arc::new(RichText::new("🖹").color(Color32::LIGHT_RED)),
+                            "Show only node without `is_licensed` flag",
+                        ),
+                    ],
+                    vec![
+                        (
+                            None,
+                            Arc::new(RichText::new("🚫")),
+                            "Enable filter by `is_unmessagable` flag",
+                        ),
+                        (
+                            Some(StaticFilterVariant::IsUnmessagable),
+                            Arc::new(RichText::new("🚫").color(Color32::LIGHT_RED)),
+                            "Show only if `is_unmessagable` is set",
+                        ),
+                    ],
+                ];
+                static_filters_vary.append(&mut extended_filters);
+            }
 
             for filters_vary in static_filters_vary {
                 let enabled_index = filters_vary
