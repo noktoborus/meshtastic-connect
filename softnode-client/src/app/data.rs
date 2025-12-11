@@ -550,20 +550,47 @@ impl NodeInfo {
                     if let Some(zone_name) = fix_gnss.point_in_zone(&fix_gnss_query) {
                         log::info!("Skip point in zone id: {:?}", zone_name);
                     } else {
+                        let timestamp = DateTime::from_timestamp(mesh_position.timestamp as i64, 0)
+                            .unwrap_or(Default::default());
+
                         let position = Position {
                             seq_number: mesh_position.seq_number,
-                            timestamp: DateTime::from_timestamp(mesh_position.timestamp as i64, 0)
-                                .unwrap_or(Default::default()),
+                            timestamp,
                             latitude,
                             longitude,
                             altitude,
                             speed: mesh_position.ground_speed(),
                         };
 
-                        if position.timestamp == DateTime::<Utc>::default() {
+                        let position_unchanged = |previous: &Position, current: &Position| {
+                            previous.latitude == current.latitude
+                                && previous.longitude == current.longitude
+                                && previous.altitude == current.altitude
+                        };
+
+                        if self.position.is_empty() {
                             self.position.push(position);
+                        } else if position.timestamp == DateTime::<Utc>::default() {
+                            if let Some(previous_position) = self.position.last() {
+                                if !position_unchanged(previous_position, &position) {
+                                    self.position.push(position);
+                                }
+                            } else {
+                                self.position.push(position);
+                            }
                         } else {
-                            push_statistic!(self.position, position);
+                            for (i, previous_position) in self.position.iter().rev().enumerate() {
+                                if previous_position == &position {
+                                    break;
+                                }
+                                if position_unchanged(previous_position, &position) {
+                                    break;
+                                }
+                                if position.timestamp > previous_position.timestamp {
+                                    self.position.insert(self.position.len() - i, position);
+                                    break;
+                                }
+                            }
                         }
                     }
                 }

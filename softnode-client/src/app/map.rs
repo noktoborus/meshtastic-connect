@@ -1013,29 +1013,31 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
         ui: &mut egui::Ui,
         node_info: &NodeInfo,
     ) -> roster::PanelCommand {
-        ui.push_id(node_info.node_id, |ui| {
-            ui.collapsing(
-                format!("Tracks ({} points)", node_info.position.len()),
-                |ui| {
-                    if let Some(tracks_config) =
-                        self.map.memory.selected_tracks.get_mut(&node_info.node_id)
-                    {
-                        ui.checkbox(&mut tracks_config.enabled, "Show on map");
-                        ui.add(&mut tracks_config.stroke);
-                    } else {
-                        let mut enabled = false;
-                        ui.checkbox(&mut enabled, "Show on map");
+        if node_info.position.len() > 1 {
+            ui.push_id(node_info.node_id, |ui| {
+                ui.collapsing(
+                    format!("Tracks ({} points)", node_info.position.len()),
+                    |ui| {
+                        if let Some(tracks_config) =
+                            self.map.memory.selected_tracks.get_mut(&node_info.node_id)
+                        {
+                            ui.checkbox(&mut tracks_config.enabled, "Show on map");
+                            ui.add(&mut tracks_config.stroke);
+                        } else {
+                            let mut enabled = false;
+                            ui.checkbox(&mut enabled, "Show on map");
 
-                        if enabled {
-                            self.map
-                                .memory
-                                .selected_tracks
-                                .insert(node_info.node_id, TracksConfig::default());
+                            if enabled {
+                                self.map
+                                    .memory
+                                    .selected_tracks
+                                    .insert(node_info.node_id, TracksConfig::default());
+                            }
                         }
-                    }
-                },
-            );
-        });
+                    },
+                );
+            });
+        }
 
         if let Some(position) =
             fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
