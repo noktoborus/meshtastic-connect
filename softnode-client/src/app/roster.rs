@@ -9,7 +9,7 @@ use crate::app::{
 };
 use egui::{Align, Button, Color32, Frame, Layout, RichText, Stroke, Vec2};
 use meshtastic_connect::keyring::node_id::NodeId;
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::format};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub enum Panel {
@@ -338,7 +338,20 @@ impl Roster {
                 }
 
                 if !node_info.gateway_for.is_empty() {
-                    ui.menu_button(format!("Gateway {}", node_info.gateway_for.len()), |ui| {
+                    let timediff = node_info
+                        .gateway_for
+                        .values()
+                        .map(|v| v.iter().map(|v| v.timestamp).max())
+                        .flatten()
+                        .max()
+                        .map(|timestamp| format_timediff(timestamp, current_datetime))
+                        .flatten();
+                    let label = if let Some(timediff) = timediff {
+                        format!("Gateway {} ({} ago)", node_info.gateway_for.len(), timediff)
+                    } else {
+                        format!("Gateway {}", node_info.gateway_for.len())
+                    };
+                    ui.menu_button(label, |ui| {
                         if ui.button("by RSSI").clicked() {
                             panel_command = PanelCommand::NextPanel(Panel::GatewayByRSSI(
                                 node_info.node_id,
