@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet, hash_map::Values};
+use std::{
+    collections::{HashMap, HashSet, hash_map::Values},
+    sync::Arc,
+};
 
 use base64::{Engine, engine::general_purpose};
 use chrono::Duration;
@@ -20,17 +23,25 @@ enum FilterVariant {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, Hash)]
+enum PublicKeyVariant {
+    None,
+    Compromised,
+    Valid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, Hash)]
 enum StaticFilterVariant {
-    CompromisedPkey,
+    PublicKey(PublicKeyVariant),
     IsLicensed,
     IsUnmessagable,
     HasEnvironmentTelemetry,
     HasDeviceTelemetry,
     HasTracks,
     HasPosition,
+    HasNoPosition,
     BoundingBox,
     IsGateway,
-    LastSeen,
+    LastSeen(Duration),
 }
 
 impl StaticFilterVariant {
@@ -42,7 +53,7 @@ impl StaticFilterVariant {
             TelemetryVariant::Voltage,
         ];
         match self {
-            StaticFilterVariant::CompromisedPkey => {}
+            StaticFilterVariant::PublicKey(_) => {}
             StaticFilterVariant::IsLicensed => {}
             StaticFilterVariant::IsUnmessagable => {}
             StaticFilterVariant::HasEnvironmentTelemetry => {
@@ -60,7 +71,10 @@ impl StaticFilterVariant {
                 return node_info.position.len() > 1;
             }
             StaticFilterVariant::HasPosition => {
-                return node_info.position.len() > 0;
+                return node_info.position.len() == 1;
+            }
+            StaticFilterVariant::HasNoPosition => {
+                return node_info.position.len() == 0;
             }
             StaticFilterVariant::BoundingBox => {
                 if let Some(position) = node_info.assumed_position.or(node_info
@@ -89,10 +103,10 @@ impl StaticFilterVariant {
                 }
                 return false;
             }
-            StaticFilterVariant::LastSeen => {
+            StaticFilterVariant::LastSeen(duration) => {
                 let now = chrono::Utc::now();
                 if let Some(last) = node_info.packet_statistics.last() {
-                    return now - last.timestamp < Duration::hours(2);
+                    return now - last.timestamp < *duration;
                 }
                 return false;
             }
@@ -103,9 +117,13 @@ impl StaticFilterVariant {
 
         if let Some(extended) = node_info.extended_info_history.last() {
             match self {
-                StaticFilterVariant::CompromisedPkey => {
-                    return matches!(extended.pkey, PublicKey::Compromised(_));
-                }
+                StaticFilterVariant::PublicKey(variant) => match variant {
+                    PublicKeyVariant::None => return matches!(extended.pkey, PublicKey::None),
+                    PublicKeyVariant::Compromised => {
+                        return matches!(extended.pkey, PublicKey::Compromised(_));
+                    }
+                    PublicKeyVariant::Valid => return matches!(extended.pkey, PublicKey::Key(_)),
+                },
                 StaticFilterVariant::IsLicensed => return extended.is_licensed,
                 StaticFilterVariant::IsUnmessagable => {
                     return Some(true) == extended.is_unmessagable;
@@ -115,8 +133,9 @@ impl StaticFilterVariant {
                 StaticFilterVariant::HasPosition => {}
                 StaticFilterVariant::BoundingBox => {}
                 StaticFilterVariant::HasDeviceTelemetry => {}
-                StaticFilterVariant::LastSeen => {}
+                StaticFilterVariant::LastSeen(_) => {}
                 StaticFilterVariant::IsGateway => {}
+                StaticFilterVariant::HasNoPosition => {}
             }
         }
 
@@ -268,12 +287,128 @@ impl NodeFilter {
                     *enabled = !*enabled;
                 });
             }
+        });
+        ui.horizontal_wrapped(|ui| {
+            let static_filters_vary = [
+                vec![
+                    (None, Arc::new(RichText::new("🔒")), "Filter by public key"),
+                    (
+                        Some(StaticFilterVariant::PublicKey(
+                            PublicKeyVariant::Compromised,
+                        )),
+                        Arc::new(RichText::new("🔒").color(Color32::YELLOW)),
+                        "Filtered by compromised public key",
+                    ),
+                    (
+                        Some(StaticFilterVariant::PublicKey(PublicKeyVariant::Valid)),
+                        Arc::new(RichText::new("🔒").color(Color32::LIGHT_GREEN)),
+                        "Filtered by valid public key",
+                    ),
+                    (
+                        Some(StaticFilterVariant::PublicKey(PublicKeyVariant::None)),
+                        Arc::new(RichText::new("🔒")),
+                        "Show nodes with no public key",
+                    ),
+                ],
+                vec![
+                    (
+                        None,
+                        Arc::new(RichText::new("🕒")),
+                        "Switch on filter by last seen time",
+                    ),
+                    (
+                        Some(StaticFilterVariant::LastSeen(Duration::hours(2))),
+                        Arc::new(RichText::new("🕒 2h")),
+                        "Filter by last seen time: 2 hours",
+                    ),
+                    (
+                        Some(StaticFilterVariant::LastSeen(Duration::hours(1))),
+                        Arc::new(RichText::new("🕒 1h")),
+                        "Filter by last seen time: 1 hour",
+                    ),
+                    (
+                        Some(StaticFilterVariant::LastSeen(Duration::minutes(30))),
+                        Arc::new(RichText::new("🕒 30m")),
+                        "Filter by last seen time: 30 minutes",
+                    ),
+                    (
+                        Some(StaticFilterVariant::LastSeen(Duration::minutes(15))),
+                        Arc::new(RichText::new("🕒 15m")),
+                        "Filter by last seen time: 15 minutes",
+                    ),
+                ],
+                vec![
+                    (
+                        None,
+                        Arc::new(RichText::new("📍")),
+                        "Switch on filter by position",
+                    ),
+                    (
+                        Some(StaticFilterVariant::HasPosition),
+                        Arc::new(RichText::new("📍")),
+                        "Node has only one position",
+                    ),
+                    (
+                        Some(StaticFilterVariant::HasTracks),
+                        Arc::new(RichText::new("🏁")),
+                        "Node has tracks (number of positions > 1)",
+                    ),
+                    (
+                        Some(StaticFilterVariant::HasNoPosition),
+                        Arc::new(RichText::new("📍").color(Color32::LIGHT_RED)),
+                        "Node has no position",
+                    ),
+                ],
+            ];
+
+            for filters_vary in static_filters_vary {
+                let enabled_index = filters_vary
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (filter_or_not, _, _))| {
+                        if let Some(filter) = filter_or_not {
+                            self.static_filter.contains(filter).then(|| Some(index))
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten()
+                    .flatten()
+                    .last();
+
+                if let Some(enabled_index) = enabled_index {
+                    if ui
+                        .selectable_label(true, filters_vary[enabled_index].1.clone())
+                        .on_hover_text(filters_vary[enabled_index].2)
+                        .clicked()
+                    {
+                        if let Some(ref filter) = filters_vary[enabled_index].0 {
+                            self.static_filter.remove(&filter);
+                            if let Some(next_filter) = filters_vary
+                                .get(enabled_index + 1)
+                                .map(|v| v.0.clone())
+                                .flatten()
+                            {
+                                self.static_filter.insert(next_filter);
+                            }
+                        }
+                    }
+                } else {
+                    if let Some(filters) = filters_vary.windows(2).next() {
+                        if let Some(ref next_filter) = filters[1].0 {
+                            if ui
+                                .selectable_label(false, filters[0].1.clone())
+                                .on_hover_text(filters[0].2)
+                                .clicked()
+                            {
+                                self.static_filter.insert(next_filter.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
             let static_filter = [
-                (
-                    StaticFilterVariant::CompromisedPkey,
-                    RichText::new("🔒").color(Color32::YELLOW),
-                    "Filter by compromised public key",
-                ),
                 (
                     StaticFilterVariant::IsLicensed,
                     RichText::new("🖹").color(Color32::LIGHT_BLUE),
@@ -295,24 +430,9 @@ impl NodeFilter {
                     "Node has device telemetry like channel util, battery level, etc.",
                 ),
                 (
-                    StaticFilterVariant::HasTracks,
-                    RichText::new("🏁"),
-                    "Node has tracks (number of positions > 1)",
-                ),
-                (
-                    StaticFilterVariant::HasPosition,
-                    RichText::new("📍"),
-                    "Node has position (number of positions > 0)",
-                ),
-                (
-                    StaticFilterVariant::LastSeen,
-                    RichText::new("🕒"),
-                    "Filter by 2-hours activity",
-                ),
-                (
                     StaticFilterVariant::IsGateway,
                     RichText::new("🖧"),
-                    "Show is node is gateway",
+                    "Show if node is gateway",
                 ),
                 (
                     StaticFilterVariant::BoundingBox,
