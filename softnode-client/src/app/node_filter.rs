@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet, hash_map::Values};
 
+use base64::{Engine, engine::general_purpose};
+use chrono::Duration;
 use egui::{Color32, RichText};
 use meshtastic_connect::keyring::{key::Key, node_id::NodeId};
 use walkers::{lat_lon, lon_lat};
@@ -27,6 +29,8 @@ enum StaticFilterVariant {
     HasTracks,
     HasPosition,
     BoundingBox,
+    IsGateway,
+    LastSeen,
 }
 
 impl StaticFilterVariant {
@@ -85,6 +89,16 @@ impl StaticFilterVariant {
                 }
                 return false;
             }
+            StaticFilterVariant::LastSeen => {
+                let now = chrono::Utc::now();
+                if let Some(last) = node_info.packet_statistics.last() {
+                    return now - last.timestamp < Duration::hours(2);
+                }
+                return false;
+            }
+            StaticFilterVariant::IsGateway => {
+                return node_info.gateway_for.len() != 0;
+            }
         }
 
         if let Some(extended) = node_info.extended_info_history.last() {
@@ -101,6 +115,8 @@ impl StaticFilterVariant {
                 StaticFilterVariant::HasPosition => {}
                 StaticFilterVariant::BoundingBox => {}
                 StaticFilterVariant::HasDeviceTelemetry => {}
+                StaticFilterVariant::LastSeen => {}
+                StaticFilterVariant::IsGateway => {}
             }
         }
 
@@ -200,10 +216,16 @@ impl NodeFilter {
         self.filter_origin = Some(filter.to_string());
         self.filter_parts.clear();
         for unparsed_part in filter.split_whitespace() {
-            if let Ok(pkey) = Key::try_from(unparsed_part) {
-                self.filter_parts
-                    .push((FilterVariant::PublicPkey(pkey), true));
-            } else if unparsed_part.starts_with("!*")
+            if let Ok(base64_decoded) = general_purpose::STANDARD.decode(unparsed_part) {
+                if base64_decoded.len() == 32 || base64_decoded.len() == 16 {
+                    if let Ok(pkey) = Key::try_from(base64_decoded) {
+                        self.filter_parts
+                            .push((FilterVariant::PublicPkey(pkey), true));
+                        continue;
+                    }
+                }
+            }
+            if unparsed_part.starts_with("!*")
                 && unparsed_part.len() <= 2 + 2 /* means: '!*' + '<2 bytes of node id's hex>' */
                 && let Ok(byte_node_id) = ByteNodeId::try_from(&unparsed_part[2..])
             {
@@ -226,7 +248,6 @@ impl NodeFilter {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            ui.label("🔍");
             for (filter_part, enabled) in self.filter_parts.iter_mut() {
                 match filter_part {
                     FilterVariant::PublicPkey(pkey) => {
@@ -265,23 +286,33 @@ impl NodeFilter {
                 ),
                 (
                     StaticFilterVariant::HasEnvironmentTelemetry,
-                    RichText::new("Environment"),
+                    RichText::new("🌱"),
                     "Node has environment telemetry like temperature, humidity, etc.",
                 ),
                 (
                     StaticFilterVariant::HasDeviceTelemetry,
-                    RichText::new("Device's Telemetry"),
+                    RichText::new("📟"),
                     "Node has device telemetry like channel util, battery level, etc.",
                 ),
                 (
                     StaticFilterVariant::HasTracks,
-                    RichText::new("Tracks"),
+                    RichText::new("🏁"),
                     "Node has tracks (number of positions > 1)",
                 ),
                 (
                     StaticFilterVariant::HasPosition,
-                    RichText::new("Position"),
+                    RichText::new("📍"),
                     "Node has position (number of positions > 0)",
+                ),
+                (
+                    StaticFilterVariant::LastSeen,
+                    RichText::new("🕒"),
+                    "Filter by 2-hours activity",
+                ),
+                (
+                    StaticFilterVariant::IsGateway,
+                    RichText::new("🖧"),
+                    "Show is node is gateway",
                 ),
                 (
                     StaticFilterVariant::BoundingBox,
