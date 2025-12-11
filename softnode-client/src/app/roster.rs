@@ -241,7 +241,7 @@ impl Roster {
             ui.horizontal(|ui| {
                 if is_via_mqtt {
                     ui.label(RichText::new("").color(Color32::LIGHT_GRAY))
-                        .on_hover_text("Some packets hearrd via MQTT");
+                        .on_hover_text("Some packets heard via MQTT");
                 }
                 if let PublicKey::Key(pkey) = extended.pkey {
                     let key_size = pkey.as_bytes().len() * 8;
