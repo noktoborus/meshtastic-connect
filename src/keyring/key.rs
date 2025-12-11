@@ -146,7 +146,10 @@ impl TryFrom<&str> for K256 {
 
         match bytes.len() {
             32 => Ok(K256(bytes.try_into().unwrap())),
-            unsupported_size => Err(format!("Unsupported key size: {} bytes", unsupported_size)),
+            unsupported_size => Err(format!(
+                "Unsupported key size: {} bytes: {:?}",
+                unsupported_size, base64_key
+            )),
         }
     }
 }
@@ -173,7 +176,10 @@ impl TryFrom<Vec<u8>> for KIndex {
             1 => Ok([bytes[0]]
                 .try_into()
                 .map_err(|e| format!("Unsupported input for indexed key: {:?}", e))?),
-            unsupported_size => Err(format!("Unsupported key size: {} bytes", unsupported_size)),
+            unsupported_size => Err(format!(
+                "Excepted 1-byte key, not {} bytes: {:x?}",
+                unsupported_size, bytes
+            )),
         }
     }
 }
@@ -223,23 +229,27 @@ impl TryFrom<Vec<u8>> for Key {
 
     // From Base64 string
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        match bytes.len() {
-            1 => {
-                Ok(Key::KIndex(bytes.try_into().map_err(|e| {
-                    format!("KIndex unsupported data: {:#x?}", e)
-                })?))
-            }
-            32 => {
-                Ok(Key::K256(K256(bytes.try_into().map_err(|e| {
-                    format!("K256 unsupported data: {:#x?}", e)
-                })?)))
-            }
-            16 => {
-                Ok(Key::K128(K128(bytes.try_into().map_err(|e| {
-                    format!("K128 unsupported data: {:#x?}", e)
-                })?)))
-            }
-            unsupported_size => Err(format!("Unsupported key size: {} bytes", unsupported_size)),
+        let len = bytes.len();
+
+        if len == 1 {
+            Ok(Key::KIndex(bytes.try_into().map_err(|e| {
+                format!("KIndex unsupported data: {:#x?}", e)
+            })?))
+        } else if len <= 16 {
+            let bytes = vec_to_array16_padded(bytes);
+            Ok(Key::K128(K128(bytes.try_into().map_err(|e| {
+                format!("K128 unsupported data: {:#x?}", e)
+            })?)))
+        } else if len <= 32 {
+            let bytes = vec_to_array32_padded(bytes);
+            Ok(Key::K256(K256(bytes.try_into().map_err(|e| {
+                format!("K256 unsupported data: {:#x?}", e)
+            })?)))
+        } else {
+            Err(format!(
+                "Expected 1, 16, or 32 bytes, not {} bytes: {:#x?}",
+                len, bytes
+            ))
         }
     }
 }
@@ -280,4 +290,18 @@ impl<'de> Deserialize<'de> for K256 {
         let s = String::deserialize(deserializer)?;
         s.try_into().map_err(de::Error::custom)
     }
+}
+
+fn vec_to_array32_padded(vec: Vec<u8>) -> [u8; 32] {
+    let mut array = [0u8; 32];
+    let len = vec.len().min(32);
+    array[..len].copy_from_slice(&vec[..len]);
+    array
+}
+
+fn vec_to_array16_padded(vec: Vec<u8>) -> [u8; 16] {
+    let mut array = [0u8; 16];
+    let len = vec.len().min(16);
+    array[..len].copy_from_slice(&vec[..len]);
+    array
 }
