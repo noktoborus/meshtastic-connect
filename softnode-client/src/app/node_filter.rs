@@ -32,7 +32,7 @@ enum PublicKeyVariant {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, Hash)]
 enum StaticFilterVariant {
     PublicKey(PublicKeyVariant),
-    IsLicensed,
+    IsLicensed(bool),
     IsUnmessagable,
     HasEnvironmentTelemetry,
     HasDeviceTelemetry,
@@ -54,7 +54,7 @@ impl StaticFilterVariant {
         ];
         match self {
             StaticFilterVariant::PublicKey(_) => {}
-            StaticFilterVariant::IsLicensed => {}
+            StaticFilterVariant::IsLicensed(_) => {}
             StaticFilterVariant::IsUnmessagable => {}
             StaticFilterVariant::HasEnvironmentTelemetry => {
                 for (variant, telemetry) in node_info.telemetry.iter() {
@@ -124,7 +124,9 @@ impl StaticFilterVariant {
                     }
                     PublicKeyVariant::Valid => return matches!(extended.pkey, PublicKey::Key(_)),
                 },
-                StaticFilterVariant::IsLicensed => return extended.is_licensed,
+                StaticFilterVariant::IsLicensed(variant) => {
+                    return *variant == extended.is_licensed;
+                }
                 StaticFilterVariant::IsUnmessagable => {
                     return Some(true) == extended.is_unmessagable;
                 }
@@ -306,7 +308,7 @@ impl NodeFilter {
                     ),
                     (
                         Some(StaticFilterVariant::PublicKey(PublicKeyVariant::None)),
-                        Arc::new(RichText::new("🔒")),
+                        Arc::new(RichText::new("🔓").color(Color32::LIGHT_RED)),
                         "Show nodes with no public key",
                     ),
                 ],
@@ -359,6 +361,35 @@ impl NodeFilter {
                         "Node has no position",
                     ),
                 ],
+                vec![
+                    (
+                        None,
+                        Arc::new(RichText::new("🖹")),
+                        "Switch on by `is_licensed` flag",
+                    ),
+                    (
+                        Some(StaticFilterVariant::IsLicensed(true)),
+                        Arc::new(RichText::new("🖹").color(Color32::LIGHT_BLUE)),
+                        "Search with enabled `is_licensed` flag",
+                    ),
+                    (
+                        Some(StaticFilterVariant::IsLicensed(false)),
+                        Arc::new(RichText::new("🖹").color(Color32::LIGHT_RED)),
+                        "Show only node without `is_licensed` flag",
+                    ),
+                ],
+                vec![
+                    (
+                        None,
+                        Arc::new(RichText::new("🚫")),
+                        "Enable filter by `is_unmessagable` flag",
+                    ),
+                    (
+                        Some(StaticFilterVariant::IsUnmessagable),
+                        Arc::new(RichText::new("🚫").color(Color32::LIGHT_RED)),
+                        "Show only if `is_unmessagable` is set",
+                    ),
+                ],
             ];
 
             for filters_vary in static_filters_vary {
@@ -409,16 +440,6 @@ impl NodeFilter {
             }
 
             let static_filter = [
-                (
-                    StaticFilterVariant::IsLicensed,
-                    RichText::new("🖹").color(Color32::LIGHT_BLUE),
-                    "Search with enabled `is_licensed` flag",
-                ),
-                (
-                    StaticFilterVariant::IsUnmessagable,
-                    RichText::new("🚫").color(Color32::LIGHT_RED),
-                    "Filter by `unmessagable` flag",
-                ),
                 (
                     StaticFilterVariant::HasEnvironmentTelemetry,
                     RichText::new("🌱"),
