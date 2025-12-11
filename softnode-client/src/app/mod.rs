@@ -500,9 +500,6 @@ impl SoftNodeApp {
                                 if let Some(telemetry_store) =
                                     node_info.telemetry.get(telemetry_variant)
                                 {
-                                    if telemetry_store.values.len() <= 1 {
-                                        continue;
-                                    }
                                     if let Some(first) = telemetry_store.values.first() {
                                         start_datetime = first.timestamp.min(start_datetime);
                                         let title = if let Some(extended) =
