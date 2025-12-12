@@ -6,7 +6,7 @@ use meshtastic_connect::keyring::node_id::NodeId;
 
 use crate::app::{
     data::{GatewayInfo, NodeInfo},
-    fix_gnss::FixGnssLibrary,
+    node_book::NodeBook,
 };
 
 fn rssi_to_distance(rssi: i32) -> f64 {
@@ -58,7 +58,7 @@ pub fn compute_weighted_center(
 pub fn assume_position(
     node_info: &NodeInfo,
     nodes: &HashMap<NodeId, NodeInfo>,
-    fix_gnss: &FixGnssLibrary,
+    nodebook: &NodeBook,
 ) -> Option<walkers::Position> {
     let to_pos_info =
         |node_id, gateway_info: Option<&GatewayInfo>| -> Option<(i32, walkers::Position)> {
@@ -75,9 +75,10 @@ pub fn assume_position(
                                     .last()
                                     .map(|pos| walkers::Position::new(pos.longitude, pos.latitude))
                                     .or_else(|| {
-                                        fix_gnss.node_get(node_id).map(|fix| {
-                                            walkers::Position::new(fix.longitude, fix.latitude)
-                                        })
+                                        nodebook
+                                            .node_get(node_id)
+                                            .map(|annotation| annotation.position)
+                                            .flatten()
                                     })
                                 {
                                     Some((rx_info.rx_rssi, position))

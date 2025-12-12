@@ -9,7 +9,7 @@ mod telemetry;
 mod telemetry_formatter;
 use std::{collections::HashMap, f32, ops::ControlFlow, sync::Arc};
 pub mod color_generator;
-pub mod fix_gnss;
+pub mod node_book;
 mod node_dump;
 pub mod radio_center;
 mod roster;
@@ -19,10 +19,10 @@ use chrono::{DateTime, Utc};
 use data::{JournalData, NodeInfo, StoredMeshPacket};
 use egui::RichText;
 use egui::mutex::Mutex;
-use fix_gnss::FixGnssLibrary;
 use journal::JournalPanel;
 use map::MapPanel;
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
+use node_book::NodeBook;
 use node_dump::NodeDump;
 use settings::Settings;
 use telemetry::Telemetry;
@@ -93,7 +93,7 @@ pub struct SoftNodeApp {
     // when persistent structure is updated
     keyring: Keyring,
     // GNSS fixes. Persistent as keyring data
-    fix_gnss: FixGnssLibrary,
+    nodebook: NodeBook,
     // Persistent data
     persistent: PersistentData,
     bootstrap_done: bool,
@@ -168,9 +168,9 @@ impl SoftNodeApp {
             .flatten()
             .unwrap_or_else(|| default_keyring());
 
-        let fix_gnss = cc
+        let nodebook = cc
             .storage
-            .map(|storage| eframe::get_value(storage, PERSISTENT_FIX_GNSS_KEY))
+            .map(|storage| eframe::get_value(storage, PERSISTENT_NODEBOOK_KEY))
             .flatten()
             .unwrap_or_else(|| Default::default());
 
@@ -192,7 +192,7 @@ impl SoftNodeApp {
             download_state,
             download_data,
             keyring,
-            fix_gnss,
+            nodebook,
             persistent,
             bootstrap_done: false,
         }
@@ -434,7 +434,7 @@ impl SoftNodeApp {
                     ..Default::default()
                 });
 
-                entry.update(&stored_mesh_packet, &self.fix_gnss);
+                entry.update(&stored_mesh_packet, &self.nodebook);
                 self.journal.push(stored_mesh_packet.clone().into());
                 if is_node_info(&stored_mesh_packet) {
                     node_info_changed.push(node_id);
@@ -447,7 +447,7 @@ impl SoftNodeApp {
                     if node_info.position.is_empty()
                         && (!node_info.gateway_for.is_empty() || !node_info.gatewayed_by.is_empty())
                     {
-                        assume_position(node_info, &self.nodes, &self.fix_gnss)
+                        assume_position(node_info, &self.nodes, &self.nodebook)
                     } else {
                         None
                     }
@@ -732,7 +732,7 @@ impl SoftNodeApp {
                         &mut self.map_context,
                         &mut self.persistent.node_filter,
                         &self.nodes,
-                        &mut self.fix_gnss,
+                        &mut self.nodebook,
                     )
                 });
             }
@@ -794,7 +794,7 @@ impl SoftNodeApp {
                     self.persistent.node_dump.ui(
                         ui,
                         self.persistent.node_filter.filter_for(&self.nodes),
-                        &self.fix_gnss,
+                        &self.nodebook,
                     )
                 });
             }
@@ -803,13 +803,13 @@ impl SoftNodeApp {
 }
 
 const PERSISTENT_KEYRING_KEY: &str = "keyring";
-const PERSISTENT_FIX_GNSS_KEY: &str = "fix_gnss";
+const PERSISTENT_NODEBOOK_KEY: &str = "node_book";
 
 impl eframe::App for SoftNodeApp {
     /// Called by the framework to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, PERSISTENT_KEYRING_KEY, &self.keyring);
-        eframe::set_value(storage, PERSISTENT_FIX_GNSS_KEY, &self.fix_gnss);
+        eframe::set_value(storage, PERSISTENT_NODEBOOK_KEY, &self.nodebook);
         self.persistent.save(storage);
     }
 
@@ -908,7 +908,7 @@ impl eframe::App for SoftNodeApp {
         // if ctx.content_rect().width() > 400.0 {
 
         if roster.show {
-            let mut map_plugin = MapRosterPlugin::new(&mut self.persistent.map, &mut self.fix_gnss);
+            let mut map_plugin = MapRosterPlugin::new(&mut self.persistent.map, &mut self.nodebook);
             let mut journal_plugin = JournalRosterPlugin::new(&mut self.persistent.journal);
             egui::SidePanel::left("Roster").show(ctx, |ui| {
                 if let Some(next_panel) = roster.ui(

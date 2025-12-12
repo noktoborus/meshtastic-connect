@@ -15,7 +15,7 @@ use crate::app::time_format::format_timediff;
 use crate::app::{
     Panel, color_generator,
     data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
-    fix_gnss::{FixGnss, FixGnssLibrary, IgnoreZone, ZoneId},
+    node_book::{Annotation, IgnoreZone, NodeBook, ZoneId},
     node_filter::NodeFilterIterator,
 };
 use crate::app::{node_filter::NodeFilter, roster};
@@ -34,12 +34,12 @@ impl MapContext {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, PartialEq, Clone, Copy)]
 struct NewZoneInfo {
-    center: FixGnss,
+    center: geo::Point,
     radius_meters: f32,
 }
 
 impl NewZoneInfo {
-    pub fn new(center: FixGnss, radius_meters: f32) -> Self {
+    pub fn new(center: geo::Point, radius_meters: f32) -> Self {
         Self {
             center,
             radius_meters,
@@ -89,7 +89,7 @@ pub struct MapPanel {
 pub struct MapPointsPlugin<'a> {
     node_iterator: NodeFilterIterator<'a>,
     memory: &'a mut Memory,
-    fix_gnss: &'a mut FixGnssLibrary,
+    nodebook: &'a mut NodeBook,
     color_generator: color_generator::ColorGenerator,
 }
 
@@ -97,25 +97,26 @@ impl<'a> MapPointsPlugin<'a> {
     pub fn new(
         node_iterator: NodeFilterIterator<'a>,
         memory: &'a mut Memory,
-        fix_gnss: &'a mut FixGnssLibrary,
+        nodebook: &'a mut NodeBook,
     ) -> Self {
         Self {
             node_iterator,
             memory,
-            fix_gnss,
+            nodebook,
             color_generator: Default::default(),
         }
     }
 }
 
 fn fix_or_position(
-    fix_gnss: &FixGnssLibrary,
+    nodebook: &NodeBook,
     node_id: NodeId,
     positions: &Vec<Position>,
 ) -> Option<walkers::Position> {
-    fix_gnss
+    nodebook
         .node_get(&node_id)
-        .map(|fix| lon_lat(fix.longitude, fix.latitude))
+        .map(|annotation| annotation.position)
+        .flatten()
         .or_else(|| {
             positions
                 .last()
@@ -179,7 +180,7 @@ impl<'a> MapPointsPlugin<'a> {
                     (
                         gateway_info.last(),
                         node_info,
-                        fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position),
+                        fix_or_position(&self.nodebook, node_info.node_id, &node_info.position),
                     )
                 })
             })
@@ -225,7 +226,7 @@ impl<'a> MapPointsPlugin<'a> {
                     continue;
                 }
                 let other_mesh_position =
-                    fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position);
+                    fix_or_position(&self.nodebook, node_info.node_id, &node_info.position);
 
                 let assumed_position = if self.memory.display_assumed_positions {
                     node_info.assumed_position
@@ -265,7 +266,7 @@ impl<'a> MapPointsPlugin<'a> {
             }
 
             let mesh_position = fix_or_position(
-                &self.fix_gnss,
+                &self.nodebook,
                 other_node_info.node_id,
                 &other_node_info.position,
             );
@@ -404,7 +405,7 @@ impl<'a> MapPointsPlugin<'a> {
         let display_gatewayed_connections =
             is_gateway && self.memory.gateway_connections == GatewayConnections::Incoming;
         let current_datetime = chrono::Utc::now();
-        let mesh_position = fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position);
+        let mesh_position = fix_or_position(&self.nodebook, node_info.node_id, &node_info.position);
         let assumed_position = self
             .memory
             .display_assumed_positions
@@ -523,15 +524,14 @@ impl<'a> MapPointsPlugin<'a> {
                 )
                 .clicked()
             {
-                self.fix_gnss
+                self.nodebook
                     .node(node_info.node_id)
                     .and_modify(|v| {
-                        v.longitude = position.x();
-                        v.latitude = position.y();
+                        v.position = Some(position);
                     })
-                    .or_insert(FixGnss {
-                        longitude: position.x(),
-                        latitude: position.y(),
+                    .or_insert(Annotation {
+                        position: Some(position),
+                        ..Default::default()
                     });
             };
         }
@@ -561,7 +561,7 @@ impl<'a> MapPointsPlugin<'a> {
         for node_info in self.node_iterator.clone() {
             let is_gateway = !node_info.gateway_for.is_empty();
             let mesh_position =
-                fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position);
+                fix_or_position(&self.nodebook, node_info.node_id, &node_info.position);
             let assumed_position = if self.memory.display_assumed_positions {
                 node_info.assumed_position
             } else {
@@ -693,7 +693,7 @@ impl<'a> MapPointsPlugin<'a> {
 
             let radius = response.rect.height().min(response.rect.width()) / 2.0 - 100.0;
             zone.radius_meters = radius / meter_scale;
-            zone.center = center_coordinates.into();
+            zone.center = center_coordinates;
             let fill_color = Color32::BLACK.gamma_multiply(0.2);
             let center = response.rect.center();
             let stroke = egui::Stroke::new(1.0, Color32::BLACK);
@@ -714,7 +714,7 @@ impl<'a> MapPointsPlugin<'a> {
                     center: center_coordinates.into(),
                     radius_meters: radius / meter_scale,
                 };
-                self.fix_gnss.zone_add(ignore_zone);
+                self.nodebook.zone_add(ignore_zone);
                 self.memory.selection = None;
             }
 
@@ -731,8 +731,8 @@ impl<'a> MapPointsPlugin<'a> {
             }
         }
 
-        for (_, zone) in self.fix_gnss.zones_list() {
-            let position = lon_lat(zone.center.longitude, zone.center.latitude);
+        for (_, zone) in self.nodebook.zones_list() {
+            let position = zone.center;
             let center = projector.project(position).to_pos2();
             let fill_color = Color32::LIGHT_GRAY.gamma_multiply(0.3);
             let radius = zone.radius_meters as f32 * projector.scale_pixel_per_meter(position);
@@ -821,11 +821,11 @@ impl MapPanel {
         map_context: &mut MapContext,
         node_filter: &mut NodeFilter,
         nodes: &HashMap<NodeId, NodeInfo>,
-        fix_gnss: &mut FixGnssLibrary,
+        nodebook: &mut NodeBook,
     ) {
         {
             let node_iterator = node_filter.filter_for(nodes);
-            let map_nodes = MapPointsPlugin::new(node_iterator, &mut self.memory, fix_gnss);
+            let map_nodes = MapPointsPlugin::new(node_iterator, &mut self.memory, nodebook);
             let map = walkers::Map::new(
                 Some(&mut map_context.tiles),
                 &mut self.map_memory,
@@ -843,12 +843,12 @@ impl MapPanel {
 
 pub struct MapRosterPlugin<'a> {
     map: &'a mut MapPanel,
-    fix_gnss: &'a mut FixGnssLibrary,
+    nodebook: &'a mut NodeBook,
 }
 
 impl<'a> MapRosterPlugin<'a> {
-    pub fn new(map: &'a mut MapPanel, fix_gnss: &'a mut FixGnssLibrary) -> Self {
-        Self { map, fix_gnss }
+    pub fn new(map: &'a mut MapPanel, nodebook: &'a mut NodeBook) -> Self {
+        Self { map, nodebook }
     }
 }
 
@@ -956,7 +956,7 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
                 let label =
                     egui::RichText::new(format!(
                         "{:.6} {:.6} {:.2} m",
-                        zone.center.longitude,  zone.center.latitude, zone.radius_meters));
+                        zone.center.x(),  zone.center.y(), zone.radius_meters));
                 ui.label(label);
 
                 if ui.button("CANCEL").clicked() {
@@ -964,11 +964,11 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
                 }
             } else {
                 if ui.button("ADD").clicked() {
-                    self.map.memory.selection = Some(MemorySelection::NewZone(NewZoneInfo::new(FixGnss::from_lon_lat(0.0, 0.0), 0.0)));
+                    self.map.memory.selection = Some(MemorySelection::NewZone(NewZoneInfo::new(geo::Point::default(), 0.0)));
                 }
             }
             let mut delete = None;
-            for (zone_id, zone) in   self.fix_gnss.zones_list_mut() {
+            for (zone_id, zone) in   self.nodebook.zones_list_mut() {
                 let selected = matches!(self.map.memory.selection, Some(selection) if selection == MemorySelection::Zone(zone_id));
 
                 let label = egui::RichText::new(zone.name.clone());
@@ -982,7 +982,7 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
                     if ui.button("EDIT").clicked() {
                         self.map
                             .map_memory
-                            .center_at(lon_lat(zone.center.longitude, zone.center.latitude));
+                            .center_at(zone.center);
                         self.map.memory.selection = Some(MemorySelection::Zone(zone_id));
                     }
                     if ui.button("DEL").clicked() {
@@ -993,15 +993,15 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
                 let label =
                     egui::RichText::new(format!(
                         "{:.6} {:.6} {:.2} m",
-                        zone.center.longitude, zone.center.latitude, zone.radius_meters));
+                        zone.center.x(), zone.center.y(), zone.radius_meters));
                 if ui.label(label).clicked() {
                     self.map
                         .map_memory
-                        .center_at(lon_lat(zone.center.longitude, zone.center.latitude));
+                        .center_at(zone.center);
                 }
             }
             if let Some(zone_id) = delete {
-                self.fix_gnss.remove_zone(zone_id);
+                self.nodebook.remove_zone(zone_id);
             }
         });
 
@@ -1040,12 +1040,12 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
         }
 
         if let Some(position) =
-            fix_or_position(&self.fix_gnss, node_info.node_id, &node_info.position)
+            fix_or_position(&self.nodebook, node_info.node_id, &node_info.position)
                 .or(node_info.assumed_position)
         {
-            if self.fix_gnss.node_get(&node_info.node_id).is_some() {
+            if self.nodebook.node_get(&node_info.node_id).is_some() {
                 if ui.button("Move").clicked() {
-                    self.fix_gnss.node_remove(&node_info.node_id);
+                    self.nodebook.node_remove(&node_info.node_id);
                 }
             }
             if ui.button("Go to position").clicked() {

@@ -1,6 +1,6 @@
 use walkers::lon_lat;
 
-use crate::app::{fix_gnss::FixGnssLibrary, node_filter::NodeFilterIterator};
+use crate::app::{node_book::NodeBook, node_filter::NodeFilterIterator};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct NodeDump {
@@ -20,7 +20,7 @@ impl NodeDump {
         &mut self,
         ui: &mut egui::Ui,
         node_iterator: NodeFilterIterator<'a>,
-        fix_gnss: &FixGnssLibrary,
+        nodebook: &NodeBook,
     ) {
         let mut text = String::new();
         let mut counter = 0;
@@ -28,9 +28,10 @@ impl NodeDump {
         for node_info in node_iterator {
             counter += 1;
             let position = if self.show_position {
-                let (position, position_marker) = if let Some(fix_position) = fix_gnss
+                let (position, position_marker) = if let Some(fix_position) = nodebook
                     .node_get(&node_info.node_id)
-                    .map(|v| lon_lat(v.longitude, v.latitude))
+                    .map(|v| v.position)
+                    .flatten()
                 {
                     (fix_position, "!")
                 } else if let Some(assumed) = node_info.assumed_position {

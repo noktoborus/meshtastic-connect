@@ -3,43 +3,10 @@ use std::collections::{HashMap, hash_map::Entry};
 use geo::{Distance, Haversine, Point};
 use meshtastic_connect::keyring::node_id::NodeId;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Copy, PartialEq)]
-pub struct FixGnss {
-    #[serde(rename = "Lat")]
-    pub latitude: f64,
-    #[serde(rename = "Lon")]
-    pub longitude: f64,
-}
-
-impl FixGnss {
-    pub fn from_lat_lon(latitude: f64, longitude: f64) -> Self {
-        FixGnss {
-            latitude,
-            longitude,
-        }
-    }
-
-    pub fn from_lon_lat(longitude: f64, latitude: f64) -> Self {
-        FixGnss {
-            latitude,
-            longitude,
-        }
-    }
-}
-
-impl From<FixGnss> for geo::Point<f64> {
-    fn from(fix: FixGnss) -> Self {
-        Point::new(fix.longitude, fix.latitude)
-    }
-}
-
-impl From<geo::Point<f64>> for FixGnss {
-    fn from(point: geo::Point<f64>) -> Self {
-        FixGnss {
-            latitude: point.y(),
-            longitude: point.x(),
-        }
-    }
+// Custom annotation for a node: manually set position, comment, manual name
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Copy, PartialEq, Default)]
+pub struct Annotation {
+    pub position: Option<Point<f64>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -47,17 +14,14 @@ pub struct IgnoreZone {
     #[serde(rename = "Title")]
     pub name: String,
     #[serde(rename = "Center")]
-    pub center: FixGnss,
+    pub center: Point<f64>,
     #[serde(rename = "Radius")]
     pub radius_meters: f32,
 }
 
 impl IgnoreZone {
-    pub fn contains(&self, point: &FixGnss) -> bool {
-        let distance = Haversine.distance(
-            Point::new(self.center.longitude, self.center.latitude),
-            Point::new(point.longitude, point.latitude),
-        );
+    pub fn contains(&self, point: Point<f64>) -> bool {
+        let distance = Haversine.distance(self.center, point);
         distance <= self.radius_meters as f64
     }
 }
@@ -80,25 +44,22 @@ impl ZoneId {
 // and changes should not affect the FixGnssLibrary
 // like Keyring
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct FixGnssLibrary {
+pub struct NodeBook {
     zone_id_generator: ZoneId,
     ignore_zones: HashMap<ZoneId, IgnoreZone>,
-    fixed_nodes: HashMap<NodeId, FixGnss>,
+    annotation: HashMap<NodeId, Annotation>,
 }
 
-impl Default for FixGnssLibrary {
+impl Default for NodeBook {
     fn default() -> Self {
         let mut new = Self {
             zone_id_generator: ZoneId(0),
             ignore_zones: HashMap::new(),
-            fixed_nodes: HashMap::new(),
+            annotation: HashMap::new(),
         };
         new.zone_add(IgnoreZone {
             name: "Null Island".into(),
-            center: FixGnss {
-                latitude: 0.0,
-                longitude: 0.0,
-            },
+            center: Point::new(0.0, 0.0),
             radius_meters: 500.0,
         });
 
@@ -106,8 +67,8 @@ impl Default for FixGnssLibrary {
     }
 }
 
-impl FixGnssLibrary {
-    pub fn point_in_zone(&self, point: &FixGnss) -> Option<ZoneId> {
+impl NodeBook {
+    pub fn point_in_zone(&self, point: Point<f64>) -> Option<ZoneId> {
         self.ignore_zones
             .iter()
             .find(|(_, zone)| zone.contains(point))
@@ -146,15 +107,15 @@ impl FixGnssLibrary {
         self.ignore_zones.remove(&id);
     }
 
-    pub fn node(&mut self, key: NodeId) -> Entry<'_, NodeId, FixGnss> {
-        self.fixed_nodes.entry(key)
+    pub fn node(&mut self, key: NodeId) -> Entry<'_, NodeId, Annotation> {
+        self.annotation.entry(key)
     }
 
-    pub fn node_get(&self, key: &NodeId) -> Option<&FixGnss> {
-        self.fixed_nodes.get(key)
+    pub fn node_get(&self, key: &NodeId) -> Option<&Annotation> {
+        self.annotation.get(key)
     }
 
     pub fn node_remove(&mut self, key: &NodeId) {
-        self.fixed_nodes.remove(key);
+        self.annotation.remove(key);
     }
 }

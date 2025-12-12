@@ -6,7 +6,7 @@ use meshtastic_connect::{
 use prost::Message;
 use std::{collections::HashMap, fmt::Display};
 
-use crate::app::fix_gnss::{FixGnss, FixGnssLibrary};
+use crate::app::node_book::NodeBook;
 
 use super::byte_node_id::ByteNodeId;
 
@@ -500,7 +500,7 @@ pub struct NodeInfo {
     pub node_id: NodeId,
     pub extended_info_history: Vec<NodeInfoExtended>,
     pub position: Vec<Position>,
-    pub assumed_position: Option<walkers::Position>,
+    pub assumed_position: Option<geo::Point>,
     pub telemetry: HashMap<TelemetryVariant, NodeTelemetry>,
     pub packet_statistics: Vec<NodePacket>,
     pub gateway_for: HashMap<NodeId, Vec<GatewayInfo>>,
@@ -523,7 +523,7 @@ impl NodeInfo {
         &mut self,
         stored_timestamp: DateTime<Utc>,
         data: &meshtastic::Data,
-        fix_gnss: &FixGnssLibrary,
+        nodebook: &NodeBook,
         is_duplicate: bool,
     ) -> Result<meshtastic::PortNum, String> {
         match data.portnum() {
@@ -544,12 +544,9 @@ impl NodeInfo {
 
                     let latitude = mesh_position.latitude_i() as f64 * 1e-7;
                     let longitude = mesh_position.longitude_i() as f64 * 1e-7;
-                    let fix_gnss_query = FixGnss {
-                        latitude,
-                        longitude,
-                    };
+                    let point = geo::Point::new(longitude, latitude);
 
-                    if let Some(zone_name) = fix_gnss.point_in_zone(&fix_gnss_query) {
+                    if let Some(zone_name) = nodebook.point_in_zone(point) {
                         log::info!("Skip point in zone id: {:?}", zone_name);
                     } else {
                         let timestamp = DateTime::from_timestamp(mesh_position.timestamp as i64, 0)
@@ -799,7 +796,7 @@ impl NodeInfo {
         }
     }
 
-    pub fn update(&mut self, stored_mesh_packet: &StoredMeshPacket, fix_gnss: &FixGnssLibrary) {
+    pub fn update(&mut self, stored_mesh_packet: &StoredMeshPacket, nodebook: &NodeBook) {
         let timestamp = stored_mesh_packet.store_timestamp;
         let is_duplicate = self
             .packet_statistics
@@ -812,7 +809,7 @@ impl NodeInfo {
             match data {
                 DataVariant::Encrypted(_) => NodePacketType::CannotDecrypt,
                 DataVariant::Decrypted(_, data) => {
-                    match self.update_using_data(timestamp, data, fix_gnss, is_duplicate) {
+                    match self.update_using_data(timestamp, data, nodebook, is_duplicate) {
                         Ok(portnum) => NodePacketType::Normal(format!("{}", portnum.as_str_name())),
                         Err(e) => {
                             log::error!("Failed to update using data: {}", e);
