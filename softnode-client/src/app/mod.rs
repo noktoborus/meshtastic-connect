@@ -583,9 +583,6 @@ impl SoftNodeApp {
                         }
                     }
 
-                    // let mut snr_per_gw_sorted: Vec<_> = snr_per_gw.iter().collect();
-                    // snr_per_gw_sorted.sort_by_key(|(k, _)| **k);
-
                     let mut rssi_per_gw_sorted: Vec<_> = rssi_per_gw.iter().collect();
                     rssi_per_gw_sorted.sort_by_key(|(k, _)| **k);
 
