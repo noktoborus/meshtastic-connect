@@ -5,7 +5,7 @@ use meshtastic_connect::keyring::node_id::NodeId;
 
 // Custom annotation for a node: manually set position, comment, manual name
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Copy, PartialEq, Default)]
-pub struct Annotation {
+pub struct NodeAnnotation {
     pub position: Option<Point<f64>>,
 }
 
@@ -47,7 +47,7 @@ impl ZoneId {
 pub struct NodeBook {
     zone_id_generator: ZoneId,
     ignore_zones: HashMap<ZoneId, IgnoreZone>,
-    annotation: HashMap<NodeId, Annotation>,
+    annotation: HashMap<NodeId, NodeAnnotation>,
 }
 
 impl Default for NodeBook {
@@ -107,11 +107,11 @@ impl NodeBook {
         self.ignore_zones.remove(&id);
     }
 
-    pub fn node(&mut self, key: NodeId) -> Entry<'_, NodeId, Annotation> {
+    pub fn node(&mut self, key: NodeId) -> Entry<'_, NodeId, NodeAnnotation> {
         self.annotation.entry(key)
     }
 
-    pub fn node_get(&self, key: &NodeId) -> Option<&Annotation> {
+    pub fn node_get(&self, key: &NodeId) -> Option<&NodeAnnotation> {
         self.annotation.get(key)
     }
 

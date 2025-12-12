@@ -1,5 +1,6 @@
 use crate::app::{
     data::{NodeInfo, NodeInfoExtended, PublicKey, TelemetryValue, TelemetryVariant},
+    node_book::NodeBook,
     node_filter::NodeFilter,
     radio_telemetry::RadioTelemetry,
     settings::Settings,
@@ -39,8 +40,14 @@ pub trait Plugin {
     fn node_is_dropped(&self, _node_info: &NodeInfo) -> bool {
         false
     }
-    fn panel_header_ui(self: &mut Self, ui: &mut egui::Ui) -> PanelCommand;
-    fn panel_node_ui(self: &mut Self, ui: &mut egui::Ui, node_info: &NodeInfo) -> PanelCommand;
+    fn panel_header_ui(self: &mut Self, ui: &mut egui::Ui, nodebook: &mut NodeBook)
+    -> PanelCommand;
+    fn panel_node_ui(
+        self: &mut Self,
+        ui: &mut egui::Ui,
+        node_info: &NodeInfo,
+        nodebook: &mut NodeBook,
+    ) -> PanelCommand;
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
@@ -68,6 +75,7 @@ impl Roster {
         telemetry_formatter: &TelemetryFormatter,
         mut roster_plugins: Vec<&'a mut dyn Plugin>,
         node_filter: &mut NodeFilter,
+        nodebook: &mut NodeBook,
         nodes: &HashMap<NodeId, NodeInfo>,
         hide_on_action: bool,
     ) -> Option<Panel> {
@@ -79,7 +87,7 @@ impl Roster {
         });
 
         for roster_plugin in roster_plugins.iter_mut() {
-            roster_plugin.panel_header_ui(ui);
+            roster_plugin.panel_header_ui(ui, nodebook);
         }
 
         node_filter.update_filter(self.filter.as_str());
@@ -104,8 +112,9 @@ impl Roster {
                 .rect
                 .height();
 
+            let excess_nodebook_clone = nodebook.clone();
             let mut filtered_nodes: Vec<(&NodeInfo, Selection)> = node_filter
-                .filter_for(nodes)
+                .seeker_for(nodes, &excess_nodebook_clone)
                 .map(|node_info| {
                     let mut selection = Selection::None;
                     for roster_plugin in roster_plugins.iter_mut() {
@@ -161,6 +170,7 @@ impl Roster {
                 }
                 let (panel_command, height) = self.node_ui(
                     ui,
+                    nodebook,
                     node_info,
                     &mut roster_plugins,
                     telemetry_formatter,
@@ -195,6 +205,7 @@ impl Roster {
     fn node_ui<'a>(
         &mut self,
         ui: &mut egui::Ui,
+        nodebook: &mut NodeBook,
         node_info: &NodeInfo,
         roster_plugins: &mut Vec<&'a mut dyn Plugin>,
         telemetry_formatter: &TelemetryFormatter,
@@ -422,7 +433,7 @@ impl Roster {
 
         let mut show_plugins = |ui: &mut egui::Ui| -> PanelCommand {
             for roster_plugin in roster_plugins.iter_mut() {
-                let probably_panel_command = roster_plugin.panel_node_ui(ui, node_info);
+                let probably_panel_command = roster_plugin.panel_node_ui(ui, node_info, nodebook);
                 if !matches!(probably_panel_command, PanelCommand::Nothing) {
                     return probably_panel_command;
                 }

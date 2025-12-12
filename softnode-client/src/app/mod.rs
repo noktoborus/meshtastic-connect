@@ -793,7 +793,9 @@ impl SoftNodeApp {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     self.persistent.node_dump.ui(
                         ui,
-                        self.persistent.node_filter.filter_for(&self.nodes),
+                        self.persistent
+                            .node_filter
+                            .seeker_for(&self.nodes, &self.nodebook),
                         &self.nodebook,
                     )
                 });
@@ -908,7 +910,7 @@ impl eframe::App for SoftNodeApp {
         // if ctx.content_rect().width() > 400.0 {
 
         if roster.show {
-            let mut map_plugin = MapRosterPlugin::new(&mut self.persistent.map, &mut self.nodebook);
+            let mut map_plugin = MapRosterPlugin::new(&mut self.persistent.map);
             let mut journal_plugin = JournalRosterPlugin::new(&mut self.persistent.journal);
             egui::SidePanel::left("Roster").show(ctx, |ui| {
                 if let Some(next_panel) = roster.ui(
@@ -916,6 +918,7 @@ impl eframe::App for SoftNodeApp {
                     &self.persistent.telemetry_formatter,
                     vec![&mut map_plugin, &mut journal_plugin],
                     &mut self.persistent.node_filter,
+                    &mut self.nodebook,
                     &self.nodes,
                     hide_on_action,
                 ) {

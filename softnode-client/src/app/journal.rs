@@ -1,7 +1,7 @@
 use egui::{Align2, Area, Frame, Label, RichText, ScrollArea, TextWrapMode};
 use meshtastic_connect::keyring::node_id::NodeId;
 
-use crate::app::{byte_node_id::ByteNodeId, data::NodeInfo, node_filter, roster};
+use crate::app::{byte_node_id::ByteNodeId, data::NodeInfo, node_book::NodeBook, roster};
 
 use super::data::JournalData;
 
@@ -232,24 +232,29 @@ impl JournalPanel {
 }
 
 pub struct JournalRosterPlugin<'a> {
-    journal: &'a mut JournalPanel,
+    _journal: &'a mut JournalPanel,
 }
 
 impl<'a> JournalRosterPlugin<'a> {
     pub fn new(journal: &'a mut JournalPanel) -> Self {
-        Self { journal }
+        Self { _journal: journal }
     }
 }
 
 impl<'a> roster::Plugin for JournalRosterPlugin<'a> {
-    fn panel_header_ui(self: &mut Self, ui: &mut egui::Ui) -> roster::PanelCommand {
+    fn panel_header_ui(
+        self: &mut Self,
+        _ui: &mut egui::Ui,
+        _nodebook: &mut NodeBook,
+    ) -> roster::PanelCommand {
         roster::PanelCommand::Nothing
     }
 
     fn panel_node_ui(
         self: &mut Self,
-        ui: &mut egui::Ui,
-        node_info: &NodeInfo,
+        _ui: &mut egui::Ui,
+        _node_info: &NodeInfo,
+        _nodebook: &mut NodeBook,
     ) -> roster::PanelCommand {
         roster::PanelCommand::Nothing
     }

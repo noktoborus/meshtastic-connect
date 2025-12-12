@@ -15,8 +15,8 @@ use crate::app::time_format::format_timediff;
 use crate::app::{
     Panel, color_generator,
     data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
-    node_book::{Annotation, IgnoreZone, NodeBook, ZoneId},
-    node_filter::NodeFilterIterator,
+    node_book::{IgnoreZone, NodeAnnotation, NodeBook, ZoneId},
+    node_filter::NodeSeeker,
 };
 use crate::app::{node_filter::NodeFilter, roster};
 
@@ -87,7 +87,7 @@ pub struct MapPanel {
 }
 
 pub struct MapPointsPlugin<'a> {
-    node_iterator: NodeFilterIterator<'a>,
+    node_iterator: NodeSeeker<'a>,
     memory: &'a mut Memory,
     nodebook: &'a mut NodeBook,
     color_generator: color_generator::ColorGenerator,
@@ -95,7 +95,7 @@ pub struct MapPointsPlugin<'a> {
 
 impl<'a> MapPointsPlugin<'a> {
     pub fn new(
-        node_iterator: NodeFilterIterator<'a>,
+        node_iterator: NodeSeeker<'a>,
         memory: &'a mut Memory,
         nodebook: &'a mut NodeBook,
     ) -> Self {
@@ -221,7 +221,10 @@ impl<'a> MapPointsPlugin<'a> {
         for (node_id, gateway_info) in gateway_node_info.gateway_for.iter() {
             let connection_color = self.color_generator.next_color();
             if let Some(node_info) = self.node_iterator.nodes.get(node_id) {
-                if !self.node_iterator.matches(&node_info) {
+                if !self
+                    .node_iterator
+                    .matches(&node_info, self.nodebook.node_get(&node_info.node_id))
+                {
                     not_on_map_nodes.push(*node_id);
                     continue;
                 }
@@ -529,7 +532,7 @@ impl<'a> MapPointsPlugin<'a> {
                     .and_modify(|v| {
                         v.position = Some(position);
                     })
-                    .or_insert(Annotation {
+                    .or_insert(NodeAnnotation {
                         position: Some(position),
                         ..Default::default()
                     });
@@ -685,7 +688,7 @@ impl<'a> MapPointsPlugin<'a> {
         ui: &mut egui::Ui,
         response: &egui::Response,
         projector: &walkers::Projector,
-        clicked_pos: Option<Pos2>,
+        _clicked_pos: Option<Pos2>,
     ) {
         if let Some(MemorySelection::NewZone(zone)) = &mut self.memory.selection {
             let center_coordinates = projector.unproject(response.rect.center().to_vec2());
@@ -824,8 +827,9 @@ impl MapPanel {
         nodebook: &mut NodeBook,
     ) {
         {
-            let node_iterator = node_filter.filter_for(nodes);
-            let map_nodes = MapPointsPlugin::new(node_iterator, &mut self.memory, nodebook);
+            let excess_nodebook_clone = nodebook.clone();
+            let node_seeker = node_filter.seeker_for(nodes, &excess_nodebook_clone);
+            let map_nodes = MapPointsPlugin::new(node_seeker, &mut self.memory, nodebook);
             let map = walkers::Map::new(
                 Some(&mut map_context.tiles),
                 &mut self.map_memory,
@@ -843,12 +847,11 @@ impl MapPanel {
 
 pub struct MapRosterPlugin<'a> {
     map: &'a mut MapPanel,
-    nodebook: &'a mut NodeBook,
 }
 
 impl<'a> MapRosterPlugin<'a> {
-    pub fn new(map: &'a mut MapPanel, nodebook: &'a mut NodeBook) -> Self {
-        Self { map, nodebook }
+    pub fn new(map: &'a mut MapPanel) -> Self {
+        Self { map }
     }
 }
 
@@ -915,7 +918,11 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
         false
     }
 
-    fn panel_header_ui(self: &mut Self, ui: &mut egui::Ui) -> roster::PanelCommand {
+    fn panel_header_ui(
+        self: &mut Self,
+        ui: &mut egui::Ui,
+        nodebook: &mut NodeBook,
+    ) -> roster::PanelCommand {
         ui.collapsing("Map settings", |ui| {
             egui::ComboBox::from_label("gateway connections")
                 .selected_text(self.map.memory.gateway_connections.to_string())
@@ -968,7 +975,7 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
                 }
             }
             let mut delete = None;
-            for (zone_id, zone) in   self.nodebook.zones_list_mut() {
+            for (zone_id, zone) in nodebook.zones_list_mut() {
                 let selected = matches!(self.map.memory.selection, Some(selection) if selection == MemorySelection::Zone(zone_id));
 
                 let label = egui::RichText::new(zone.name.clone());
@@ -1001,7 +1008,7 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
                 }
             }
             if let Some(zone_id) = delete {
-                self.nodebook.remove_zone(zone_id);
+                nodebook.remove_zone(zone_id);
             }
         });
 
@@ -1012,6 +1019,7 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
         self: &mut Self,
         ui: &mut egui::Ui,
         node_info: &NodeInfo,
+        nodebook: &mut NodeBook,
     ) -> roster::PanelCommand {
         if node_info.position.len() > 1 {
             ui.push_id(node_info.node_id, |ui| {
@@ -1039,13 +1047,12 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
             });
         }
 
-        if let Some(position) =
-            fix_or_position(&self.nodebook, node_info.node_id, &node_info.position)
-                .or(node_info.assumed_position)
+        if let Some(position) = fix_or_position(nodebook, node_info.node_id, &node_info.position)
+            .or(node_info.assumed_position)
         {
-            if self.nodebook.node_get(&node_info.node_id).is_some() {
+            if nodebook.node_get(&node_info.node_id).is_some() {
                 if ui.button("Move").clicked() {
-                    self.nodebook.node_remove(&node_info.node_id);
+                    nodebook.node_remove(&node_info.node_id);
                 }
             }
             if ui.button("Go to position").clicked() {

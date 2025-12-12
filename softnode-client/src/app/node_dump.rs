@@ -1,6 +1,6 @@
 use walkers::lon_lat;
 
-use crate::app::{node_book::NodeBook, node_filter::NodeFilterIterator};
+use crate::app::{node_book::NodeBook, node_filter::NodeSeeker};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct NodeDump {
@@ -19,7 +19,7 @@ impl NodeDump {
     pub fn ui<'a>(
         &mut self,
         ui: &mut egui::Ui,
-        node_iterator: NodeFilterIterator<'a>,
+        node_iterator: NodeSeeker<'a>,
         nodebook: &NodeBook,
     ) {
         let mut text = String::new();

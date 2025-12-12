@@ -12,6 +12,7 @@ use walkers::{lat_lon, lon_lat};
 use crate::app::{
     byte_node_id::ByteNodeId,
     data::{NodeInfo, PublicKey, TelemetryVariant},
+    node_book::{NodeAnnotation, NodeBook},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -49,6 +50,7 @@ impl StaticFilterVariant {
         &self,
         bbox: &[walkers::Position; 2],
         node_info: &NodeInfo,
+        node_annotation: Option<&NodeAnnotation>,
         ignore_extended: bool,
     ) -> bool {
         let device_telemetry = [
@@ -82,10 +84,12 @@ impl StaticFilterVariant {
                 return node_info.position.len() == 0;
             }
             StaticFilterVariant::BoundingBox => {
-                if let Some(position) = node_info.assumed_position.or(node_info
-                    .position
-                    .last()
-                    .map(|v| lon_lat(v.longitude, v.latitude)))
+                if let Some(position) = node_annotation.map(|a| a.position).flatten().or(node_info
+                    .assumed_position
+                    .or(node_info
+                        .position
+                        .last()
+                        .map(|v| lon_lat(v.longitude, v.latitude))))
                 {
                     let p1 = bbox[0];
                     let p2 = bbox[1];
@@ -228,17 +232,17 @@ impl NodeFilter {
         Default::default()
     }
 
-    pub fn matches(&self, node: &NodeInfo) -> bool {
+    pub fn matches(&self, node_info: &NodeInfo, node_annotation: Option<&NodeAnnotation>) -> bool {
         let ignore_extended = match self.known_nodes_filter {
             KnownNodesFilter::Unspecified => false,
             KnownNodesFilter::Known => {
-                if node.extended_info_history.is_empty() {
+                if node_info.extended_info_history.is_empty() {
                     return false;
                 }
                 false
             }
             KnownNodesFilter::Unknown => {
-                if !node.extended_info_history.is_empty() {
+                if !node_info.extended_info_history.is_empty() {
                     return false;
                 }
                 true
@@ -247,14 +251,14 @@ impl NodeFilter {
 
         for (filter_part, enabled) in &self.filter_parts {
             if *enabled {
-                if !filter_part.matches(node) {
+                if !filter_part.matches(node_info) {
                     return false;
                 }
             }
         }
 
         for static_filter in &self.static_filter {
-            if !static_filter.matches(&self.bbox, node, ignore_extended) {
+            if !static_filter.matches(&self.bbox, node_info, node_annotation, ignore_extended) {
                 return false;
             }
         }
@@ -560,14 +564,15 @@ impl NodeFilter {
     }
 
     // Get iterator &'a filterdes
-    pub fn filter_for<'a>(
+    pub fn seeker_for<'a>(
         &'a self,
         nodes: &'a HashMap<NodeId, NodeInfo>,
-    ) -> NodeFilterIterator<'a> {
-        NodeFilterIterator {
+        nodebook: &'a NodeBook,
+    ) -> NodeSeeker<'a> {
+        NodeSeeker {
             nodes,
-            nodes_iterator: nodes.values(),
-
+            nodebook,
+            iterator: nodes.values(),
             filter: self,
         }
     }
@@ -579,26 +584,30 @@ impl NodeFilter {
 }
 
 #[derive(Clone)]
-pub struct NodeFilterIterator<'a> {
+pub struct NodeSeeker<'a> {
     // Direct access to NodeInfo by NodeId
     pub nodes: &'a HashMap<NodeId, NodeInfo>,
-    nodes_iterator: Values<'a, NodeId, NodeInfo>,
+    // Direct access to NodeBook
+    pub nodebook: &'a NodeBook,
+    iterator: Values<'a, NodeId, NodeInfo>,
     filter: &'a NodeFilter,
 }
 
-impl<'a> NodeFilterIterator<'a> {
-    pub fn matches(&self, node: &NodeInfo) -> bool {
-        self.filter.matches(node)
+impl<'a> NodeSeeker<'a> {
+    pub fn matches(&self, node_info: &NodeInfo, node_annotation: Option<&NodeAnnotation>) -> bool {
+        self.filter.matches(node_info, node_annotation)
     }
 }
 
-impl<'a> Iterator for NodeFilterIterator<'a> {
+impl<'a> Iterator for NodeSeeker<'a> {
     type Item = &'a NodeInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(node) = self.nodes_iterator.next() {
-            if self.filter.matches(node) {
-                return Some(node);
+        while let Some(node_info) = self.iterator.next() {
+            let node_annotation = self.nodebook.node_get(&node_info.node_id);
+
+            if self.matches(node_info, node_annotation) {
+                return Some(node_info);
             }
         }
         None
