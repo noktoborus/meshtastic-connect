@@ -561,42 +561,25 @@ impl SoftNodeApp {
             }
             Panel::Rssi(node_id, telemetry) => {
                 let mut start_datetime = DateTime::<Utc>::MAX_UTC;
-                let mut telemetry_list = Vec::new();
 
                 if let Some(node_info) = &self.nodes.get(&node_id) {
-                    // let mut snr = Vec::new();
-                    let mut rssi = Vec::new();
                     let mut max_rssi = f32::MIN;
-                    // let mut snr_per_gw: HashMap<NodeId, Vec<NodeTelemetry>> = Default::default();
-                    let mut rssi_per_gw: HashMap<NodeId, Vec<TelemetryValue>> = Default::default();
+                    let mut rssi_per_gw: HashMap<Option<NodeId>, Vec<TelemetryValue>> =
+                        Default::default();
 
                     for packet_info in &node_info.packet_statistics {
                         start_datetime = packet_info.timestamp.min(start_datetime);
                         if let Some(rx_info) = &packet_info.rx_info {
-                            // let snr_telemetry = NodeTelemetry {
-                            //     timestamp: packet_info.timestamp,
-                            //     value: rx_info.rx_snr as f64,
-                            // };
                             max_rssi = max_rssi.max(rx_info.rx_rssi as f32);
                             let rssi_telemetry = TelemetryValue {
                                 timestamp: packet_info.timestamp,
                                 value: rx_info.rx_rssi as f64,
                             };
 
-                            if let Some(gateway) = packet_info.gateway {
-                                // snr_per_gw
-                                //     .entry(gateway)
-                                //     .or_insert(Default::default())
-                                //     .push(snr_telemetry);
-
-                                rssi_per_gw
-                                    .entry(gateway)
-                                    .or_insert(Default::default())
-                                    .push(rssi_telemetry);
-                            } else {
-                                // snr.push(snr_telemetry);
-                                rssi.push(rssi_telemetry)
-                            }
+                            rssi_per_gw
+                                .entry(packet_info.gateway)
+                                .or_insert(Default::default())
+                                .push(rssi_telemetry);
                         }
                     }
 
@@ -605,27 +588,6 @@ impl SoftNodeApp {
 
                     let mut rssi_per_gw_sorted: Vec<_> = rssi_per_gw.iter().collect();
                     rssi_per_gw_sorted.sort_by_key(|(k, _)| **k);
-
-                    // for (gateway_id, list) in &snr_per_gw_sorted {
-                    //     telemetry_list.push((format!("SNR {}", gateway_id), *list));
-                    // }
-
-                    for (gateway_id, list) in &rssi_per_gw_sorted {
-                        let title = if let Some(gateway_extended_info) = self
-                            .nodes
-                            .get(gateway_id)
-                            .map(|v| v.extended_info_history.last())
-                            .flatten()
-                        {
-                            format!("RSSI {} {}", gateway_id, gateway_extended_info.short_name)
-                        } else {
-                            format!("RSSI {}", gateway_id)
-                        };
-                        telemetry_list.push((title, *list));
-                    }
-
-                    // telemetry_list.push((format!("SNR <unknown gateway>"), &snr));
-                    telemetry_list.push((format!("RSSI <unknown gateway>"), &rssi));
 
                     egui::CentralPanel::default().show(ctx, |ui| {
                         let title =
@@ -637,11 +599,13 @@ impl SoftNodeApp {
                             } else {
                                 format!("{}\nRSSI per gateways", node_id)
                             };
-                        if telemetry_list.len() != 0 {
+                        if rssi_per_gw_sorted.len() != 0 {
                             telemetry.ui(
                                 ui,
+                                &self.nodes,
                                 start_datetime,
-                                telemetry_list,
+                                rssi_per_gw_sorted,
+                                None,
                                 Some(title),
                                 false,
                                 Some(max_rssi),
@@ -654,11 +618,12 @@ impl SoftNodeApp {
             }
             Panel::Hops(node_id, telemetry) => {
                 let mut start_datetime = DateTime::<Utc>::MAX_UTC;
-                let mut telemetry_list = Vec::new();
 
                 if let Some(node_info) = &self.nodes.get(&node_id) {
-                    let mut hops = Vec::new();
-                    let mut hops_per_gw: HashMap<NodeId, Vec<TelemetryValue>> = Default::default();
+                    let mut hops_per_gw: HashMap<Option<NodeId>, Vec<TelemetryValue>> =
+                        Default::default();
+                    let mut dup_packets: HashMap<(Option<NodeId>, u32), Vec<TelemetryValue>> =
+                        Default::default();
 
                     for packet_info in &node_info.packet_statistics {
                         start_datetime = packet_info.timestamp.min(start_datetime);
@@ -666,37 +631,25 @@ impl SoftNodeApp {
                             .hop_distance
                             .map(|v| v as f64)
                             .unwrap_or(-(packet_info.hop_limit as f64));
+
                         let hop_telemetry = TelemetryValue {
                             timestamp: packet_info.timestamp,
                             value: distance,
                         };
 
-                        if let Some(gateway) = packet_info.gateway {
-                            hops_per_gw.entry(gateway).or_default().push(hop_telemetry);
-                        } else {
-                            hops.push(hop_telemetry);
-                        }
+                        dup_packets
+                            .entry((packet_info.gateway, packet_info.packet_id))
+                            .or_default()
+                            .push(hop_telemetry.clone());
+
+                        hops_per_gw
+                            .entry(packet_info.gateway)
+                            .or_default()
+                            .push(hop_telemetry);
                     }
 
                     let mut hops_per_gw_sorted: Vec<_> = hops_per_gw.iter().collect();
                     hops_per_gw_sorted.sort_by_key(|(k, _)| **k);
-
-                    for (gateway_id, list) in &hops_per_gw_sorted {
-                        let title = if let Some(gateway_extended_info) = self
-                            .nodes
-                            .get(gateway_id)
-                            .map(|v| v.extended_info_history.last())
-                            .flatten()
-                        {
-                            format!("{} {}", gateway_id, gateway_extended_info.short_name)
-                        } else {
-                            format!("{}", gateway_id)
-                        };
-                        telemetry_list.push((title, *list));
-                    }
-
-                    // telemetry_list.push((format!("SNR <unknown gateway>"), &snr));
-                    telemetry_list.push((format!("<unknown gateway>"), &hops));
 
                     egui::CentralPanel::default().show(ctx, |ui| {
                         let title =
@@ -708,11 +661,13 @@ impl SoftNodeApp {
                             } else {
                                 format!("{}\nHops away/hop limit per gateways", node_id)
                             };
-                        if telemetry_list.len() != 0 {
+                        if hops_per_gw_sorted.len() != 0 {
                             telemetry.ui(
                                 ui,
+                                &self.nodes,
                                 start_datetime,
-                                telemetry_list,
+                                hops_per_gw_sorted,
+                                Some(dup_packets),
                                 Some(title),
                                 false,
                                 None,
@@ -725,59 +680,43 @@ impl SoftNodeApp {
             }
             Panel::GatewayByRSSI(gateway_id, telemetry) => {
                 if let Some(gateway_info) = self.nodes.get(gateway_id) {
+                    let mut rssi_per_node: HashMap<Option<NodeId>, Vec<TelemetryValue>> =
+                        Default::default();
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
                     let mut max_rssi = f32::MIN;
-                    let rssi = gateway_info
-                        .gateway_for
-                        .iter()
-                        .filter(|(k, _)| *k != gateway_id)
-                        .map(|(k, v)| {
-                            (
-                                k,
-                                v.iter()
-                                    .map(|v| {
-                                        start_datetime = v.timestamp.min(start_datetime);
-                                        TelemetryValue {
-                                            timestamp: v.timestamp,
-                                            value: v
-                                                .rx_info
-                                                .as_ref()
-                                                .map(|rx_info| {
-                                                    max_rssi = max_rssi.max(rx_info.rx_rssi as f32);
-                                                    rx_info.rx_rssi as f64
-                                                })
-                                                .unwrap_or(0.0),
-                                        }
+
+                    for (node_id, gateway_infos) in &gateway_info.gateway_for {
+                        for gateway_info in gateway_infos {
+                            start_datetime = gateway_info.timestamp.min(start_datetime);
+                            let telemetry_value = TelemetryValue {
+                                timestamp: gateway_info.timestamp,
+                                value: gateway_info
+                                    .rx_info
+                                    .as_ref()
+                                    .map(|rx_info| {
+                                        max_rssi = max_rssi.max(rx_info.rx_rssi as f32);
+                                        rx_info.rx_rssi as f64
                                     })
-                                    .collect::<Vec<_>>(),
-                            )
-                        })
-                        .collect::<Vec<_>>();
-                    let rssi_with_refs: Vec<_> = rssi
-                        .iter()
-                        .map(|(node_id, v)| {
-                            (
-                                if let Some(extended_info) = self
-                                    .nodes
-                                    .get(node_id)
-                                    .map(|node_info| node_info.extended_info_history.last())
-                                    .flatten()
-                                {
-                                    format!("{} {}", node_id, extended_info.short_name)
-                                } else {
-                                    node_id.to_string()
-                                },
-                                v,
-                            )
-                        })
-                        .collect();
+                                    .unwrap_or(0.0),
+                            };
+                            rssi_per_node
+                                .entry(Some(*node_id))
+                                .or_default()
+                                .push(telemetry_value);
+                        }
+                    }
+
+                    let mut sorted: Vec<_> = rssi_per_node.iter().collect();
+                    sorted.sort_by_key(|(k, _)| *k);
 
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        if rssi.len() != 0 {
+                        if sorted.len() != 0 {
                             telemetry.ui(
                                 ui,
+                                &self.nodes,
                                 start_datetime,
-                                rssi_with_refs,
+                                sorted,
+                                None,
                                 Some(format!("{} RSSI", gateway_id)),
                                 false,
                                 Some(max_rssi),
@@ -803,54 +742,46 @@ impl SoftNodeApp {
             Panel::GatewayByHops(gateway_id, telemetry) => {
                 if let Some(gateway_info) = self.nodes.get(gateway_id) {
                     let mut start_datetime = DateTime::<Utc>::MAX_UTC;
-                    let hops = gateway_info
-                        .gateway_for
-                        .iter()
-                        .filter(|(k, _)| *k != gateway_id)
-                        .map(|(k, v)| {
-                            (
-                                k,
-                                v.iter()
-                                    .map(|v| {
-                                        start_datetime = v.timestamp.min(start_datetime);
-                                        TelemetryValue {
-                                            timestamp: v.timestamp,
-                                            value: if let Some(hop_distance) = v.hop_distance {
-                                                hop_distance as f64
-                                            } else {
-                                                -(v.hop_limit as f64)
-                                            },
-                                        }
-                                    })
-                                    .collect::<Vec<_>>(),
-                            )
-                        })
-                        .collect::<Vec<_>>();
-                    let hops_with_refs: Vec<_> = hops
-                        .iter()
-                        .map(|(node_id, v)| {
-                            (
-                                if let Some(extended_info) = self
-                                    .nodes
-                                    .get(node_id)
-                                    .map(|node_info| node_info.extended_info_history.last())
-                                    .flatten()
-                                {
-                                    format!("{} {}", node_id, extended_info.short_name)
+                    let mut hops_per_node: HashMap<Option<NodeId>, Vec<TelemetryValue>> =
+                        Default::default();
+                    let mut dup_packets: HashMap<(Option<NodeId>, u32), Vec<TelemetryValue>> =
+                        Default::default();
+
+                    for (node_id, gateway_infos) in &gateway_info.gateway_for {
+                        for gateway_info in gateway_infos {
+                            start_datetime = gateway_info.timestamp.min(start_datetime);
+                            let telemetry_value = TelemetryValue {
+                                timestamp: gateway_info.timestamp,
+                                value: if let Some(hop_distance) = gateway_info.hop_distance {
+                                    hop_distance as f64
                                 } else {
-                                    node_id.to_string()
+                                    -(gateway_info.hop_limit as f64)
                                 },
-                                v,
-                            )
-                        })
-                        .collect();
+                            };
+
+                            dup_packets
+                                .entry((Some(*node_id), gateway_info.packet_id))
+                                .or_default()
+                                .push(telemetry_value.clone());
+
+                            hops_per_node
+                                .entry(Some(*node_id))
+                                .or_default()
+                                .push(telemetry_value);
+                        }
+                    }
+
+                    let mut sorted: Vec<_> = hops_per_node.iter().collect();
+                    sorted.sort_by_key(|(k, _)| *k);
 
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        if hops.len() != 0 {
+                        if sorted.len() != 0 {
                             telemetry.ui(
                                 ui,
+                                &self.nodes,
                                 start_datetime,
-                                hops_with_refs,
+                                sorted,
+                                Some(dup_packets),
                                 Some(format!("{} hops", gateway_id)),
                                 false,
                                 None,

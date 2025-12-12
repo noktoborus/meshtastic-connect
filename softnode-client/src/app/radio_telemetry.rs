@@ -1,9 +1,10 @@
 use chrono::{DateTime, NaiveTime, Utc};
 use egui::{Color32, RichText, TextStyle, emath::OrderedFloat, epaint::Hsva};
-use egui_plot::{HLine, PlotItem, Text};
+use egui_plot::{HLine, Line, PlotItem, Text};
+use meshtastic_connect::keyring::node_id::NodeId;
 use std::{collections::HashMap, time::Duration};
 
-use crate::app::data::TelemetryValue;
+use crate::app::data::{NodeInfo, TelemetryValue};
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct RadioTelemetry {}
@@ -72,8 +73,10 @@ impl RadioTelemetry {
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
+        nodes: &HashMap<NodeId, NodeInfo>,
         start_time: DateTime<Utc>,
-        telemetry: Vec<(String, &Vec<TelemetryValue>)>,
+        telemetry: Vec<(&Option<NodeId>, &Vec<TelemetryValue>)>,
+        link_telemetry: Option<HashMap<(Option<NodeId>, u32), Vec<TelemetryValue>>>,
         title: Option<String>,
         draw_line: bool,
         stem_base: Option<f32>,
@@ -111,9 +114,26 @@ impl RadioTelemetry {
         let mut sum_start_offset: f64 = 0.0;
         let mut sum_end_offset: f64 = 0.0;
 
+        let build_title = |gateway_id: &Option<NodeId>| -> String {
+            if let Some(gateway_id) = gateway_id {
+                if let Some(gateway_extended_info) = nodes
+                    .get(gateway_id)
+                    .map(|v| v.extended_info_history.last())
+                    .flatten()
+                {
+                    format!("{} {}", gateway_id, gateway_extended_info.short_name)
+                } else {
+                    format!("{}", gateway_id)
+                }
+            } else {
+                "<unknown>".to_string()
+            }
+        };
+
         legend_plot.show(ui, |plot_ui| {
+            let mut colors: HashMap<Option<NodeId>, Color32> = Default::default();
             // if let Some((title, node_telemetry)) = telemetry.first() {
-            for (title, node_telemetry) in telemetry.iter() {
+            for (gateway_id, node_telemetry) in telemetry.iter() {
                 let points: Vec<[f64; 2]> = node_telemetry
                     .iter()
                     .map(|v| {
@@ -134,9 +154,12 @@ impl RadioTelemetry {
                     })
                     .collect();
 
-                let color = color_generator.next_color();
+                let color = *colors
+                    .entry(**gateway_id)
+                    .or_insert_with(|| color_generator.next_color());
+                let title = build_title(gateway_id);
 
-                let mut plot_points = egui_plot::Points::new(title, points.clone())
+                let mut plot_points = egui_plot::Points::new(title.as_str(), points.clone())
                     .radius(4.0)
                     .color(color);
                 if let Some(average) = stem_base {
@@ -146,7 +169,11 @@ impl RadioTelemetry {
                     let id = PlotItem::id(&plot_points);
                     let color = PlotItem::color(&plot_points);
                     plot_ui.points(plot_points);
-                    plot_ui.line(egui_plot::Line::new(title, points).id(id).color(color));
+                    plot_ui.line(
+                        egui_plot::Line::new(title.as_str(), points)
+                            .id(id)
+                            .color(color),
+                    );
                 } else {
                     plot_ui.points(plot_points);
                 }
@@ -166,6 +193,28 @@ impl RadioTelemetry {
                     let point = [sum_end_offset + 1.0, value.0];
                     let text = Text::new("Counter", point.into(), label);
                     plot_ui.text(text);
+                }
+            }
+            if let Some(link_telemetry) = link_telemetry {
+                for ((gateway_id, _packet_id), values) in link_telemetry {
+                    let title = build_title(&gateway_id);
+                    let color = *colors
+                        .entry(gateway_id)
+                        .or_insert_with(|| color_generator.next_color());
+                    let line = Line::new(
+                        title,
+                        values
+                            .iter()
+                            .map(|v| {
+                                [
+                                    (v.timestamp.timestamp() - basetime.timestamp()) as f64 / 60.0,
+                                    v.value,
+                                ]
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .color(color);
+                    plot_ui.line(line);
                 }
             }
         });
