@@ -9,7 +9,7 @@ use crate::app::{
 };
 use egui::{Align, Button, Color32, Frame, Layout, RichText, Stroke, Vec2};
 use meshtastic_connect::keyring::node_id::NodeId;
-use std::{collections::HashMap, fmt::format};
+use std::collections::HashMap;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub enum Panel {
