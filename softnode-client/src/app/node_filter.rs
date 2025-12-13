@@ -7,7 +7,7 @@ use base64::{Engine, engine::general_purpose};
 use chrono::Duration;
 use egui::{Color32, RichText};
 use meshtastic_connect::keyring::{key::Key, node_id::NodeId};
-use walkers::{lat_lon, lon_lat};
+use walkers::lon_lat;
 
 use crate::app::{
     byte_node_id::ByteNodeId,
@@ -48,7 +48,7 @@ enum StaticFilterVariant {
 impl StaticFilterVariant {
     pub fn matches(
         &self,
-        bbox: &[walkers::Position; 2],
+        bbox: &Option<[walkers::Position; 2]>,
         node_info: &NodeInfo,
         node_annotation: Option<&NodeAnnotation>,
         ignore_extended: bool,
@@ -84,25 +84,31 @@ impl StaticFilterVariant {
                 return node_info.position.len() == 0;
             }
             StaticFilterVariant::BoundingBox => {
-                if let Some(position) = node_annotation.map(|a| a.position).flatten().or(node_info
-                    .assumed_position
-                    .or(node_info
-                        .position
-                        .last()
-                        .map(|v| lon_lat(v.longitude, v.latitude))))
-                {
-                    let p1 = bbox[0];
-                    let p2 = bbox[1];
-
-                    if position.x() < p1.x()
-                        && position.y() > p1.y()
-                        && position.x() > p2.x()
-                        && position.y() < p2.y()
+                if let Some(bbox) = bbox {
+                    if let Some(position) =
+                        node_annotation.map(|a| a.position).flatten().or(node_info
+                            .assumed_position
+                            .or(node_info
+                                .position
+                                .last()
+                                .map(|v| lon_lat(v.longitude, v.latitude))))
                     {
-                        return true;
+                        let p1 = bbox[0];
+                        let p2 = bbox[1];
+
+                        if position.x() < p1.x()
+                            && position.y() > p1.y()
+                            && position.x() > p2.x()
+                            && position.y() < p2.y()
+                        {
+                            return true;
+                        }
                     }
+                    return false;
+                } else {
+                    /* no bbox info is passed */
+                    return true;
                 }
-                return false;
             }
             StaticFilterVariant::HasDeviceTelemetry => {
                 for (variant, telemetry) in node_info.telemetry.iter() {
@@ -212,7 +218,7 @@ pub struct NodeFilter {
     static_filter: HashSet<StaticFilterVariant>,
     filter_origin: Option<String>,
     // Bounding box for filtering nodes based on their positions
-    bbox: [walkers::Position; 2],
+    bbox: Option<[walkers::Position; 2]>,
 }
 
 impl Default for NodeFilter {
@@ -222,7 +228,7 @@ impl Default for NodeFilter {
             filter_parts: Vec::new(),
             static_filter: HashSet::new(),
             filter_origin: None,
-            bbox: [lat_lon(86.0, -180.0), lat_lon(-86.0, 180.0)],
+            bbox: None,
         }
     }
 }
@@ -368,49 +374,49 @@ impl NodeFilter {
                     (
                         None,
                         Arc::new(RichText::new("🕒")),
-                        "Switch on filter by last seen time",
+                        "Switch on filter by last seen time".to_string(),
                     ),
                     (
                         Some(StaticFilterVariant::LastSeen(Duration::hours(2))),
                         Arc::new(RichText::new("🕒 2h")),
-                        "Filter by last seen time: 2 hours",
+                        "Filter by last seen time: 2 hours".to_string(),
                     ),
                     (
                         Some(StaticFilterVariant::LastSeen(Duration::hours(1))),
                         Arc::new(RichText::new("🕒 1h")),
-                        "Filter by last seen time: 1 hour",
+                        "Filter by last seen time: 1 hour".to_string(),
                     ),
                     (
                         Some(StaticFilterVariant::LastSeen(Duration::minutes(30))),
                         Arc::new(RichText::new("🕒 30m")),
-                        "Filter by last seen time: 30 minutes",
+                        "Filter by last seen time: 30 minutes".to_string(),
                     ),
                     (
                         Some(StaticFilterVariant::LastSeen(Duration::minutes(15))),
                         Arc::new(RichText::new("🕒 15m")),
-                        "Filter by last seen time: 15 minutes",
+                        "Filter by last seen time: 15 minutes".to_string(),
                     ),
                 ],
                 vec![
                     (
                         None,
                         Arc::new(RichText::new("📍")),
-                        "Switch on filter by position",
+                        "Switch on filter by position".to_string(),
                     ),
                     (
                         Some(StaticFilterVariant::HasPosition),
                         Arc::new(RichText::new("📍")),
-                        "Node has only one position",
+                        "Node has only one position".to_string(),
                     ),
                     (
                         Some(StaticFilterVariant::HasTracks),
                         Arc::new(RichText::new("🏁")),
-                        "Node has tracks (number of positions > 1)",
+                        "Node has tracks (number of positions > 1)".to_string(),
                     ),
                     (
                         Some(StaticFilterVariant::HasNoPosition),
                         Arc::new(RichText::new("📍").color(Color32::LIGHT_RED)),
-                        "Node has no position",
+                        "Node has no position".to_string(),
                     ),
                 ],
             ];
@@ -418,56 +424,81 @@ impl NodeFilter {
             if show_extended {
                 let mut extended_filters = vec![
                     vec![
-                        (None, Arc::new(RichText::new("🔒")), "Filter by public key"),
+                        (
+                            None,
+                            Arc::new(RichText::new("🔒")),
+                            "Filter by public key".to_string(),
+                        ),
                         (
                             Some(StaticFilterVariant::PublicKey(
                                 PublicKeyVariant::Compromised,
                             )),
                             Arc::new(RichText::new("🔒").color(Color32::YELLOW)),
-                            "Filtered by compromised public key",
+                            "Filtered by compromised public key".to_string(),
                         ),
                         (
                             Some(StaticFilterVariant::PublicKey(PublicKeyVariant::Valid)),
                             Arc::new(RichText::new("🔒").color(Color32::LIGHT_GREEN)),
-                            "Filtered by valid public key",
+                            "Filtered by valid public key".to_string(),
                         ),
                         (
                             Some(StaticFilterVariant::PublicKey(PublicKeyVariant::None)),
                             Arc::new(RichText::new("🔓").color(Color32::LIGHT_RED)),
-                            "Show nodes with no public key",
+                            "Show nodes with no public key".to_string(),
                         ),
                     ],
                     vec![
                         (
                             None,
                             Arc::new(RichText::new("🖹")),
-                            "Switch on by `is_licensed` flag",
+                            "Switch on by `is_licensed` flag".to_string(),
                         ),
                         (
                             Some(StaticFilterVariant::IsLicensed(true)),
                             Arc::new(RichText::new("🖹").color(Color32::LIGHT_BLUE)),
-                            "Search with enabled `is_licensed` flag",
+                            "Search with enabled `is_licensed` flag".to_string(),
                         ),
                         (
                             Some(StaticFilterVariant::IsLicensed(false)),
                             Arc::new(RichText::new("🖹").color(Color32::LIGHT_RED)),
-                            "Show only node without `is_licensed` flag",
+                            "Show only node without `is_licensed` flag".to_string(),
                         ),
                     ],
                     vec![
                         (
                             None,
                             Arc::new(RichText::new("🚫")),
-                            "Enable filter by `is_unmessagable` flag",
+                            "Enable filter by `is_unmessagable` flag".to_string(),
                         ),
                         (
                             Some(StaticFilterVariant::IsUnmessagable),
                             Arc::new(RichText::new("🚫").color(Color32::LIGHT_RED)),
-                            "Show only if `is_unmessagable` is set",
+                            "Show only if `is_unmessagable` is set".to_string(),
                         ),
                     ],
                 ];
                 static_filters_vary.append(&mut extended_filters);
+            }
+
+            if let Some(bbox) = self.bbox {
+                static_filters_vary.push(vec![
+                    (
+                        None,
+                        Arc::new(RichText::new("🌐")),
+                        "Filter by map's view".to_string(),
+                    ),
+                    (
+                        Some(StaticFilterVariant::BoundingBox),
+                        Arc::new(RichText::new("🌐")),
+                        format!(
+                            "Filter by bounding box: [{:.6}, {:.6}, {:.6}, {:.6}]",
+                            bbox[0].y(),
+                            bbox[0].x(),
+                            bbox[1].y(),
+                            bbox[1].x(),
+                        ),
+                    ),
+                ]);
             }
 
             for filters_vary in static_filters_vary {
@@ -488,7 +519,7 @@ impl NodeFilter {
                 if let Some(enabled_index) = enabled_index {
                     if ui
                         .selectable_label(true, filters_vary[enabled_index].1.clone())
-                        .on_hover_text(filters_vary[enabled_index].2)
+                        .on_hover_text(filters_vary[enabled_index].2.as_str())
                         .clicked()
                     {
                         if let Some(ref filter) = filters_vary[enabled_index].0 {
@@ -507,7 +538,7 @@ impl NodeFilter {
                         if let Some(ref next_filter) = filters[1].0 {
                             if ui
                                 .selectable_label(false, filters[0].1.clone())
-                                .on_hover_text(filters[0].2)
+                                .on_hover_text(filters[0].2.as_str())
                                 .clicked()
                             {
                                 self.static_filter.insert(next_filter.clone());
@@ -532,17 +563,6 @@ impl NodeFilter {
                     StaticFilterVariant::IsGateway,
                     RichText::new("🖧"),
                     "Show if node is gateway",
-                ),
-                (
-                    StaticFilterVariant::BoundingBox,
-                    RichText::new(format!(
-                        "[{:.6}, {:.6}, {:.6}, {:.6}]",
-                        self.bbox[0].y(),
-                        self.bbox[0].x(),
-                        self.bbox[1].y(),
-                        self.bbox[1].x(),
-                    )),
-                    "Filter by bounding box",
                 ),
             ];
 
@@ -579,7 +599,7 @@ impl NodeFilter {
 
     // Set bounding box for filtering nodes based on position
     pub fn set_bbox(&mut self, bbox: [walkers::Position; 2]) {
-        self.bbox = bbox;
+        self.bbox = Some(bbox);
     }
 }
 
