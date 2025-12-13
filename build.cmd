@@ -10,8 +10,8 @@ REM IF ERRORLEVEL 1 (
 REM     exit /b 1
 REM )
 
-cd softnode-client
-trunk build --release --dist ..\web
-IF ERRORLEVEL 1 (
-    exit /b 1
-)
+REM cd softnode-client
+REM trunk build --release --dist ..\web
+REM IF ERRORLEVEL 1 (
+REM     exit /b 1
+REM )

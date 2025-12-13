@@ -31,15 +31,27 @@ enum PublicKeyVariant {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, Hash)]
+enum PositionVariant {
+    // No fixed, assumed or network's position
+    None,
+    // Only one point
+    Point,
+    // Multiple points
+    Track,
+    // Assumed position based on other nodes' positions
+    Assumed,
+    // Fixed position in nodebook
+    Fixed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, Hash)]
 enum StaticFilterVariant {
     PublicKey(PublicKeyVariant),
     IsLicensed(bool),
     IsUnmessagable,
     HasEnvironmentTelemetry,
     HasDeviceTelemetry,
-    HasTracks,
-    HasPosition,
-    HasNoPosition,
+    Position(PositionVariant),
     BoundingBox,
     IsGateway,
     LastSeen(Duration),
@@ -74,15 +86,19 @@ impl StaticFilterVariant {
                 }
                 return false;
             }
-            StaticFilterVariant::HasTracks => {
-                return node_info.position.len() > 1;
-            }
-            StaticFilterVariant::HasPosition => {
-                return node_info.position.len() == 1;
-            }
-            StaticFilterVariant::HasNoPosition => {
-                return node_info.position.len() == 0;
-            }
+            StaticFilterVariant::Position(variant) => match variant {
+                PositionVariant::None => {
+                    return node_info.position.len() == 0
+                        && node_info.assumed_position.is_none()
+                        && node_annotation.map_or(true, |a| a.position.is_none());
+                }
+                PositionVariant::Point => return node_info.position.len() == 1,
+                PositionVariant::Track => return node_info.position.len() > 1,
+                PositionVariant::Assumed => return node_info.assumed_position.is_some(),
+                PositionVariant::Fixed => {
+                    return node_annotation.map_or(false, |a| a.position.is_some());
+                }
+            },
             StaticFilterVariant::BoundingBox => {
                 if let Some(bbox) = bbox {
                     if let Some(position) =
@@ -150,13 +166,11 @@ impl StaticFilterVariant {
                     return Some(true) == extended.is_unmessagable;
                 }
                 StaticFilterVariant::HasEnvironmentTelemetry => {}
-                StaticFilterVariant::HasTracks => {}
-                StaticFilterVariant::HasPosition => {}
+                StaticFilterVariant::Position(_) => {}
                 StaticFilterVariant::BoundingBox => {}
                 StaticFilterVariant::HasDeviceTelemetry => {}
                 StaticFilterVariant::LastSeen(_) => {}
                 StaticFilterVariant::IsGateway => {}
-                StaticFilterVariant::HasNoPosition => {}
             }
         }
 
@@ -264,7 +278,11 @@ impl NodeFilter {
         }
 
         for static_filter in &self.static_filter {
-            if !static_filter.matches(&self.bbox, node_info, node_annotation, ignore_extended) {
+            let position_is_available = !self
+                .static_filter
+                .contains(&StaticFilterVariant::Position(PositionVariant::None));
+            let bbox = &position_is_available.then(|| self.bbox).flatten();
+            if !static_filter.matches(bbox, node_info, node_annotation, ignore_extended) {
                 return false;
             }
         }
@@ -336,6 +354,9 @@ impl NodeFilter {
             }
         });
         ui.horizontal_wrapped(|ui| {
+            let position_is_available = !self
+                .static_filter
+                .contains(&StaticFilterVariant::Position(PositionVariant::None));
             let show_extended = match self.known_nodes_filter {
                 KnownNodesFilter::Unspecified => {
                     if ui
@@ -404,19 +425,29 @@ impl NodeFilter {
                         "Switch on filter by position".to_string(),
                     ),
                     (
-                        Some(StaticFilterVariant::HasPosition),
+                        Some(StaticFilterVariant::Position(PositionVariant::Point)),
                         Arc::new(RichText::new("📍")),
                         "Node has only one position".to_string(),
                     ),
                     (
-                        Some(StaticFilterVariant::HasTracks),
+                        Some(StaticFilterVariant::Position(PositionVariant::Track)),
                         Arc::new(RichText::new("🏁")),
                         "Node has tracks (number of positions > 1)".to_string(),
                     ),
                     (
-                        Some(StaticFilterVariant::HasNoPosition),
+                        Some(StaticFilterVariant::Position(PositionVariant::Fixed)),
+                        Arc::new(RichText::new("✋📍").color(Color32::YELLOW)),
+                        "Show if position is set manually".to_string(),
+                    ),
+                    (
+                        Some(StaticFilterVariant::Position(PositionVariant::Assumed)),
+                        Arc::new(RichText::new("❓📍").color(Color32::YELLOW)),
+                        "Show nodes only with assumed positions".to_string(),
+                    ),
+                    (
+                        Some(StaticFilterVariant::Position(PositionVariant::None)),
                         Arc::new(RichText::new("📍").color(Color32::LIGHT_RED)),
-                        "Node has no position".to_string(),
+                        "Show nodes without any position".to_string(),
                     ),
                 ],
             ];
@@ -480,7 +511,7 @@ impl NodeFilter {
                 static_filters_vary.append(&mut extended_filters);
             }
 
-            if let Some(bbox) = self.bbox {
+            if position_is_available && let Some(bbox) = self.bbox {
                 static_filters_vary.push(vec![
                     (
                         None,
