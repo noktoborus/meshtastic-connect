@@ -16,7 +16,6 @@ use crate::app::{
     Panel, color_generator,
     data::{GatewayInfo, NodeInfo, Position, TelemetryVariant},
     node_book::{IgnoreZone, NodeAnnotation, NodeBook, ZoneId},
-    node_filter::NodeSeeker,
 };
 use crate::app::{node_filter::NodeFilter, roster};
 
@@ -87,7 +86,8 @@ pub struct MapPanel {
 }
 
 pub struct MapPointsPlugin<'a> {
-    node_iterator: NodeSeeker<'a>,
+    node_filter: &'a NodeFilter,
+    nodes: &'a HashMap<NodeId, NodeInfo>,
     memory: &'a mut Memory,
     nodebook: &'a mut NodeBook,
     color_generator: color_generator::ColorGenerator,
@@ -95,12 +95,14 @@ pub struct MapPointsPlugin<'a> {
 
 impl<'a> MapPointsPlugin<'a> {
     pub fn new(
-        node_iterator: NodeSeeker<'a>,
+        node_filter: &'a NodeFilter,
+        nodes: &'a HashMap<NodeId, NodeInfo>,
         memory: &'a mut Memory,
         nodebook: &'a mut NodeBook,
     ) -> Self {
         Self {
-            node_iterator,
+            node_filter,
+            nodes,
             memory,
             nodebook,
             color_generator: Default::default(),
@@ -173,8 +175,8 @@ impl<'a> MapPointsPlugin<'a> {
     ) -> Vec<NodeId> {
         let mut not_on_map_nodes = Vec::new();
         for (gateway_info, gateway_node_info, other_mesh_position) in self
-            .node_iterator
-            .clone()
+            .node_filter
+            .seeker_for(self.nodes, self.nodebook)
             .map(|node_info| {
                 node_info.gateway_for.get(&node_id).map(|gateway_info| {
                     (
@@ -220,9 +222,9 @@ impl<'a> MapPointsPlugin<'a> {
         let mut not_on_map_nodes = Vec::new();
         for (node_id, gateway_info) in gateway_node_info.gateway_for.iter() {
             let connection_color = self.color_generator.next_color();
-            if let Some(node_info) = self.node_iterator.nodes.get(node_id) {
+            if let Some(node_info) = self.nodes.get(node_id) {
                 if !self
-                    .node_iterator
+                    .node_filter
                     .matches(&node_info, self.nodebook.node_get(&node_info.node_id))
                 {
                     not_on_map_nodes.push(*node_id);
@@ -263,7 +265,7 @@ impl<'a> MapPointsPlugin<'a> {
         selected_is_gateway: bool,
         current_datetime: DateTime<Utc>,
     ) {
-        for other_node_info in self.node_iterator.clone() {
+        for other_node_info in self.node_filter.seeker_for(self.nodes, self.nodebook) {
             if other_node_info.node_id == selected_node_info.node_id {
                 continue;
             }
@@ -288,8 +290,7 @@ impl<'a> MapPointsPlugin<'a> {
                         .map(|v| v.last())
                         .flatten()
                 } else {
-                    self.node_iterator
-                        .nodes
+                    self.nodes
                         .get(&other_node_info.node_id)
                         .map(|v| {
                             v.gateway_for
@@ -561,7 +562,7 @@ impl<'a> MapPointsPlugin<'a> {
         projector: &walkers::Projector,
         clicked_pos: Option<Pos2>,
     ) {
-        for node_info in self.node_iterator.clone() {
+        for node_info in self.node_filter.seeker_for(self.nodes, self.nodebook) {
             let is_gateway = !node_info.gateway_for.is_empty();
             let mesh_position =
                 fix_or_position(&self.nodebook, node_info.node_id, &node_info.position);
@@ -640,7 +641,7 @@ impl<'a> MapPointsPlugin<'a> {
 
     fn draw_tracks(self: &mut Box<Self>, ui: &mut egui::Ui, projector: &walkers::Projector) {
         let default_tracks = Default::default();
-        for node_info in self.node_iterator.clone() {
+        for node_info in self.node_filter.seeker_for(self.nodes, self.nodebook) {
             if node_info.position.len() < 2 {
                 continue;
             }
@@ -793,8 +794,7 @@ impl<'a> walkers::Plugin for MapPointsPlugin<'a> {
             .selection
             .map(|selection| {
                 if let MemorySelection::Node(selected_node_id) = selection {
-                    self.node_iterator
-                        .nodes
+                    self.nodes
                         .get(&selected_node_id)
                         .map(|selected_node_info| selected_node_info)
                 } else {
@@ -827,9 +827,9 @@ impl MapPanel {
         nodebook: &mut NodeBook,
     ) {
         {
-            let excess_nodebook_clone = nodebook.clone();
-            let node_seeker = node_filter.seeker_for(nodes, &excess_nodebook_clone);
-            let map_nodes = MapPointsPlugin::new(node_seeker, &mut self.memory, nodebook);
+            // let excess_nodebook_clone = nodebook.clone();
+            // let node_seeker = node_filter.seeker_for(nodes, &excess_nodebook_clone);
+            let map_nodes = MapPointsPlugin::new(node_filter, nodes, &mut self.memory, nodebook);
             let map = walkers::Map::new(
                 Some(&mut map_context.tiles),
                 &mut self.map_memory,

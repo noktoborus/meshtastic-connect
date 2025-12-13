@@ -112,25 +112,27 @@ impl Roster {
                 .rect
                 .height();
 
-            let excess_nodebook_clone = nodebook.clone();
-            let mut filtered_nodes: Vec<(&NodeInfo, Selection)> = node_filter
-                .seeker_for(nodes, &excess_nodebook_clone)
-                .map(|node_info| {
-                    let mut selection = Selection::None;
-                    for roster_plugin in roster_plugins.iter_mut() {
-                        if roster_plugin.node_is_dropped(node_info) {
-                            return (None, Selection::None);
+            let mut filtered_nodes: Vec<(&NodeInfo, Selection)> = {
+                nodes
+                    .values()
+                    .filter(|v| node_filter.matches(*v, nodebook.node_get(&v.node_id)))
+                    .map(|node_info| {
+                        let mut selection = Selection::None;
+                        for roster_plugin in roster_plugins.iter_mut() {
+                            if roster_plugin.node_is_dropped(node_info) {
+                                return (None, Selection::None);
+                            }
+                            let nselection = roster_plugin.node_is_selected(node_info);
+                            if nselection != Selection::None {
+                                selection = nselection;
+                            }
                         }
-                        let nselection = roster_plugin.node_is_selected(node_info);
-                        if nselection != Selection::None {
-                            selection = nselection;
-                        }
-                    }
-                    (Some(node_info), selection)
-                })
-                .filter(|(node_info_or_not, _)| node_info_or_not.is_some())
-                .map(|(node_info, selection)| (node_info.unwrap(), selection))
-                .collect();
+                        (Some(node_info), selection)
+                    })
+                    .filter(|(node_info_or_not, _)| node_info_or_not.is_some())
+                    .map(|(node_info, selection)| (node_info.unwrap(), selection))
+                    .collect::<Vec<_>>()
+            };
 
             y_offset += Frame::new()
                 .show(ui, |ui| {
