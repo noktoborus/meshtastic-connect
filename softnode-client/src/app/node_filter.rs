@@ -17,7 +17,7 @@ use crate::app::{
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 enum FilterVariant {
-    Generic(String),
+    Generic(String, String),
     PublicPkey(Key),
     ByteNodeId(ByteNodeId),
     NodeId(NodeId),
@@ -181,12 +181,12 @@ impl StaticFilterVariant {
 impl FilterVariant {
     pub fn matches(&self, node_info: &NodeInfo) -> bool {
         match self {
-            FilterVariant::Generic(string) => {
+            FilterVariant::Generic(_, normalized_string) => {
                 if node_info
                     .node_id
                     .to_string()
                     .to_lowercase()
-                    .contains(string)
+                    .contains(normalized_string)
                 {
                     return true;
                 }
@@ -199,9 +199,15 @@ impl FilterVariant {
 
         if let Some(extended) = node_info.extended_info_history.last() {
             match self {
-                FilterVariant::Generic(string) => {
-                    return extended.short_name.to_lowercase().contains(string)
-                        || extended.long_name.to_lowercase().contains(string);
+                FilterVariant::Generic(_, normalized_string) => {
+                    return extended
+                        .short_name
+                        .to_lowercase()
+                        .contains(normalized_string)
+                        || extended
+                            .long_name
+                            .to_lowercase()
+                            .contains(normalized_string);
                 }
                 FilterVariant::PublicPkey(key) => match extended.pkey {
                     PublicKey::None => return false,
@@ -323,7 +329,10 @@ impl NodeFilter {
                     .push((FilterVariant::NodeId(node_id), true));
             } else {
                 self.filter_parts.push((
-                    FilterVariant::Generic(unparsed_part.to_string().to_lowercase()),
+                    FilterVariant::Generic(
+                        unparsed_part.to_string(),
+                        unparsed_part.to_string().to_lowercase(),
+                    ),
                     true,
                 ));
             }
@@ -343,8 +352,8 @@ impl NodeFilter {
                     FilterVariant::ByteNodeId(byte_node_id) => {
                         ui.selectable_label(*enabled, format!("rnid:{}", byte_node_id))
                     }
-                    FilterVariant::Generic(generic) => {
-                        ui.selectable_label(*enabled, format!("{}", generic))
+                    FilterVariant::Generic(origin_string, _normalized_string) => {
+                        ui.selectable_label(*enabled, format!("{}", origin_string))
                     }
                 }
                 .clicked()
