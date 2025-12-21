@@ -643,6 +643,28 @@ impl<'a> MapPointsPlugin<'a> {
         let default_tracks = Default::default();
         let mut drop_unprecise = false;
         for node_info in self.node_filter.seeker_for(self.nodes, self.nodebook) {
+            if Some(MemorySelection::Node(node_info.node_id)) == self.memory.selection {
+                if let Some(last_position) = node_info.position.last() {
+                    if !last_position.precision_bounds.is_empty() {
+                        if last_position.precision_bounds.len() == 2 {
+                            let rect = Rect::from_two_pos(
+                                projector
+                                    .project(last_position.precision_bounds[0])
+                                    .to_pos2(),
+                                projector
+                                    .project(last_position.precision_bounds[1])
+                                    .to_pos2(),
+                            );
+                            ui.painter().rect_filled(
+                                rect,
+                                0.0,
+                                Color32::LIGHT_YELLOW.gamma_multiply(0.6),
+                            );
+                        }
+                    }
+                }
+            }
+
             if node_info.position.len() < 2 {
                 continue;
             }
@@ -656,6 +678,11 @@ impl<'a> MapPointsPlugin<'a> {
             let stroke = match self.memory.display_tracks {
                 DisplayTracks::All => {
                     drop_unprecise = true;
+                    if let Some(selection) = self.memory.selection {
+                        if MemorySelection::Node(node_info.node_id) == selection {
+                            drop_unprecise = false;
+                        }
+                    }
                     tracks_config.stroke
                 }
                 DisplayTracks::OnlySelected => {

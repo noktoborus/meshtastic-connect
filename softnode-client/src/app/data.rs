@@ -398,7 +398,7 @@ impl NodeTelemetry {
     }
 }
 
-#[derive(serde::Deserialize, serde::Serialize, PartialEq, PartialOrd)]
+#[derive(serde::Deserialize, serde::Serialize, PartialEq)]
 pub struct Position {
     pub seq_number: u32,
     pub timestamp: DateTime<Utc>,
@@ -407,6 +407,7 @@ pub struct Position {
     pub altitude: i32,
     pub speed: u32,
     pub precision_bits: u32,
+    pub precision_bounds: Vec<geo::Point>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, PartialEq, PartialOrd)]
@@ -543,8 +544,8 @@ impl NodeInfo {
                         0
                     };
 
-                    let latitude = mesh_position.latitude_i() as f64 * 1e-7;
-                    let longitude = mesh_position.longitude_i() as f64 * 1e-7;
+                    let mut latitude = mesh_position.latitude_i() as f64 * 1e-7;
+                    let mut longitude = mesh_position.longitude_i() as f64 * 1e-7;
                     let point = geo::Point::new(longitude, latitude);
 
                     if let Some(zone_name) = nodebook.point_in_zone(point) {
@@ -552,6 +553,19 @@ impl NodeInfo {
                     } else {
                         let timestamp = DateTime::from_timestamp(mesh_position.timestamp as i64, 0)
                             .unwrap_or(Default::default());
+
+                        let precision_bounds = if mesh_position.precision_bits < 32 {
+                            let fix = (1_u64 << (32 - mesh_position.precision_bits)) as f64 * 1e-7;
+
+                            let c1 = geo::Point::new(longitude, latitude);
+                            let c2 = geo::Point::new(longitude + fix, latitude + fix);
+                            let center = geo::Rect::new(c1, c2).center();
+                            (longitude, latitude) = center.x_y();
+
+                            vec![c1, c2]
+                        } else {
+                            vec![]
+                        };
 
                         let position = Position {
                             seq_number: mesh_position.seq_number,
@@ -561,6 +575,7 @@ impl NodeInfo {
                             altitude,
                             speed: mesh_position.ground_speed(),
                             precision_bits: mesh_position.precision_bits,
+                            precision_bounds,
                         };
 
                         let position_unchanged = |previous: &Position, current: &Position| {
