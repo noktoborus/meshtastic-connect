@@ -406,6 +406,7 @@ pub struct Position {
     pub longitude: f64,
     pub altitude: i32,
     pub speed: u32,
+    pub precision_bits: u32,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, PartialEq, PartialOrd)]
@@ -559,6 +560,7 @@ impl NodeInfo {
                             longitude,
                             altitude,
                             speed: mesh_position.ground_speed(),
+                            precision_bits: mesh_position.precision_bits,
                         };
 
                         let position_unchanged = |previous: &Position, current: &Position| {

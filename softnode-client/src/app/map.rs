@@ -641,6 +641,7 @@ impl<'a> MapPointsPlugin<'a> {
 
     fn draw_tracks(self: &mut Box<Self>, ui: &mut egui::Ui, projector: &walkers::Projector) {
         let default_tracks = Default::default();
+        let mut drop_unprecise = false;
         for node_info in self.node_filter.seeker_for(self.nodes, self.nodebook) {
             if node_info.position.len() < 2 {
                 continue;
@@ -653,7 +654,10 @@ impl<'a> MapPointsPlugin<'a> {
                 .unwrap_or(&default_tracks);
 
             let stroke = match self.memory.display_tracks {
-                DisplayTracks::All => tracks_config.stroke,
+                DisplayTracks::All => {
+                    drop_unprecise = true;
+                    tracks_config.stroke
+                }
                 DisplayTracks::OnlySelected => {
                     if tracks_config.enabled {
                         tracks_config.stroke
@@ -666,6 +670,12 @@ impl<'a> MapPointsPlugin<'a> {
             let total_segments = node_info.position.len() - 1;
 
             for i in 0..total_segments {
+                if drop_unprecise {
+                    if node_info.position[i].precision_bits < 30 {
+                        continue;
+                    }
+                }
+
                 let p1 = projector
                     .project(lon_lat(
                         node_info.position[i].longitude,
@@ -1055,7 +1065,20 @@ impl<'a> roster::Plugin for MapRosterPlugin<'a> {
                     nodebook.node_remove(&node_info.node_id);
                 }
             }
-            if ui.button("Go to position").clicked() {
+            let text = if nodebook
+                .node_get(&node_info.node_id)
+                .map(|v| v.position.is_some())
+                .unwrap_or(false)
+            {
+                "Go to position (fixed)".to_string()
+            } else if let Some(last_position) = node_info.position.last() {
+                format!("Go to position ({} bits)", last_position.precision_bits)
+            } else if node_info.assumed_position.is_some() {
+                "Go to position (assumed)".to_string()
+            } else {
+                "Go to position".to_string()
+            };
+            if ui.button(text).clicked() {
                 self.map.memory.selection = Some(MemorySelection::Node(node_info.node_id));
                 self.map.map_memory.center_at(position);
                 return roster::PanelCommand::NextPanel(Panel::Map);
