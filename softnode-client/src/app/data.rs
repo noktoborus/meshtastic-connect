@@ -805,8 +805,22 @@ impl NodeInfo {
                                 );
                             }
                         }
-                        meshtastic::telemetry::Variant::LocalStats(_local_stats) => {
-                            log::info!("Telemetry::LocalStats ignored");
+                        meshtastic::telemetry::Variant::LocalStats(local_stats) => {
+                            if local_stats.air_util_tx != 0.0 {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirUtilTx,
+                                    local_stats.air_util_tx as f64,
+                                );
+                            }
+                            if local_stats.channel_utilization != 0.0 {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::ChannelUtilization,
+                                    local_stats.channel_utilization as f64,
+                                );
+                            }
+                            log::info!("Telemetry::LocalStats from {} ignored", self.node_id);
                         }
                         meshtastic::telemetry::Variant::HealthMetrics(health_metrics) => {
                             if let Some(heart_rate) = health_metrics.heart_bpm {
@@ -828,7 +842,7 @@ impl NodeInfo {
                             }
                         }
                         meshtastic::telemetry::Variant::HostMetrics(_host_metrics) => {
-                            log::info!("Telemetry::HostMetrics ignored");
+                            log::info!("Telemetry::HostMetrics from {} ignored", self.node_id);
                         }
                     }
                 }
