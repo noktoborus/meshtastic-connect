@@ -312,6 +312,11 @@ pub enum TelemetryVariant {
     ChannelUtilization,
     Voltage,
     BatteryLevel,
+
+    // Health metrics
+    HeartRate,
+    SpO2,
+    HealthTemperature,
 }
 
 impl Display for TelemetryVariant {
@@ -334,6 +339,9 @@ impl Display for TelemetryVariant {
             TelemetryVariant::ChannelUtilization => write!(f, "Device Channel Utilization"),
             TelemetryVariant::Voltage => write!(f, "Device Voltage"),
             TelemetryVariant::BatteryLevel => write!(f, "Device Battery Level"),
+            TelemetryVariant::HeartRate => write!(f, "Heart Rate"),
+            TelemetryVariant::SpO2 => write!(f, "SpO2"),
+            TelemetryVariant::HealthTemperature => write!(f, "Health Temperature"),
         }
     }
 }
@@ -800,8 +808,24 @@ impl NodeInfo {
                         meshtastic::telemetry::Variant::LocalStats(_local_stats) => {
                             log::info!("Telemetry::LocalStats ignored");
                         }
-                        meshtastic::telemetry::Variant::HealthMetrics(_health_metrics) => {
-                            log::info!("Telemetry::HealthMetrics ignored");
+                        meshtastic::telemetry::Variant::HealthMetrics(health_metrics) => {
+                            if let Some(heart_rate) = health_metrics.heart_bpm {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::HeartRate,
+                                    heart_rate as f64,
+                                );
+                            }
+                            if let Some(spo2) = health_metrics.sp_o2 {
+                                self.push_telemetry(timestamp, TelemetryVariant::SpO2, spo2 as f64);
+                            }
+                            if let Some(temperature) = health_metrics.temperature {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::HealthTemperature,
+                                    temperature as f64,
+                                );
+                            }
                         }
                         meshtastic::telemetry::Variant::HostMetrics(_host_metrics) => {
                             log::info!("Telemetry::HostMetrics ignored");

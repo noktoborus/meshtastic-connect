@@ -69,6 +69,9 @@ impl TelemetryFormatter {
             TelemetryVariant::ChannelUtilization => value,
             TelemetryVariant::Voltage => value,
             TelemetryVariant::BatteryLevel => value,
+            TelemetryVariant::HeartRate => value,
+            TelemetryVariant::SpO2 => value,
+            TelemetryVariant::HealthTemperature => value,
         }
     }
     pub fn format(&self, value: f64, variant: TelemetryVariant) -> String {
@@ -99,6 +102,9 @@ impl TelemetryFormatter {
             TelemetryVariant::ChannelUtilization => format!("{:.2} %/min", value),
             TelemetryVariant::Voltage => format!("{:.2} V", value),
             TelemetryVariant::BatteryLevel => format!("{:.0}%", value),
+            TelemetryVariant::HeartRate => format!("{:.2} bpm", value),
+            TelemetryVariant::SpO2 => format!("{:.2}%", value),
+            TelemetryVariant::HealthTemperature => format!("{:.2} °C", value),
         }
     }
 }
