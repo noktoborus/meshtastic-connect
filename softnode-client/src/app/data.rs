@@ -323,7 +323,7 @@ impl Display for TelemetryVariant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TelemetryVariant::BarometricPressure => write!(f, "Pressure"),
-            TelemetryVariant::Temperature => write!(f, "Temperature"),
+            TelemetryVariant::Temperature => write!(f, "Environment Temperature"),
             TelemetryVariant::Lux => write!(f, "Lux"),
             TelemetryVariant::Iaq => write!(f, "Iaq"),
             TelemetryVariant::Humidity => write!(f, "Humidity"),
