@@ -963,10 +963,6 @@ impl NodeInfo {
                             log::info!("Telemetry::LocalStats from {} ignored", self.node_id);
                         }
                         meshtastic::telemetry::Variant::HealthMetrics(health_metrics) => {
-                            log::info!(
-                                "Telemetry::HealthMetrics from {} not ignored",
-                                self.node_id
-                            );
                             if let Some(heart_rate) = health_metrics.heart_bpm {
                                 self.push_telemetry(
                                     timestamp,
