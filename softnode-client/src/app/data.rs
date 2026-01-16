@@ -1016,10 +1016,17 @@ impl NodeInfo {
     }
 
     pub fn update(&mut self, stored_mesh_packet: &StoredMeshPacket, nodebook: &NodeBook) {
+        let current_time = chrono::Utc::now();
         let timestamp = stored_mesh_packet.store_timestamp;
         let is_duplicate = self
             .packet_statistics
             .iter()
+            .rev()
+            .take_while(|v|
+                // I believe that 30 minutes is enough to consider it a duplicate
+                // Duplicate can be received as retranslation from another node
+                // or from very slow MQTT
+                v.timestamp > current_time - chrono::Duration::minutes(30))
             .find(|v| v.packet_id == stored_mesh_packet.header.id)
             .is_some();
         // TODO: move to perday_telemetry
