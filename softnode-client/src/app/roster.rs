@@ -443,6 +443,7 @@ impl Roster {
             }
 
             let device_telemetry = [
+                TelemetryVariant::UptimeSeconds,
                 TelemetryVariant::ChannelUtilization,
                 TelemetryVariant::AirUtilTx,
                 TelemetryVariant::Voltage,

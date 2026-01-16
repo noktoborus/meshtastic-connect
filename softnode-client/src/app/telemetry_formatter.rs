@@ -1,5 +1,7 @@
 use std::fmt;
 
+use chrono::Duration;
+
 use crate::app::data::TelemetryVariant;
 
 #[derive(serde::Deserialize, serde::Serialize, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -72,6 +74,7 @@ impl TelemetryFormatter {
             TelemetryVariant::HeartRate => value,
             TelemetryVariant::SpO2 => value,
             TelemetryVariant::HealthTemperature => value,
+            TelemetryVariant::UptimeSeconds => value,
         }
     }
     pub fn format(&self, value: f64, variant: TelemetryVariant) -> String {
@@ -105,6 +108,17 @@ impl TelemetryFormatter {
             TelemetryVariant::HeartRate => format!("{:.2} bpm", value),
             TelemetryVariant::SpO2 => format!("{:.2}%", value),
             TelemetryVariant::HealthTemperature => format!("{:.2} °C", value),
+            TelemetryVariant::UptimeSeconds => {
+                let timediff = Duration::seconds(value as i64);
+
+                if timediff.num_hours() > 1 {
+                    format!("{} h", timediff.num_hours())
+                } else if timediff.num_minutes() > 1 {
+                    format!("{} m", timediff.num_minutes())
+                } else {
+                    format!("{} s", timediff.num_seconds())
+                }
+            }
         }
     }
 }

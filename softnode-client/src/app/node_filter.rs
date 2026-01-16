@@ -67,10 +67,11 @@ impl StaticFilterVariant {
         ignore_extended: bool,
     ) -> bool {
         let device_telemetry = [
-            TelemetryVariant::BatteryLevel,
-            TelemetryVariant::AirUtilTx,
+            TelemetryVariant::UptimeSeconds,
             TelemetryVariant::ChannelUtilization,
+            TelemetryVariant::AirUtilTx,
             TelemetryVariant::Voltage,
+            TelemetryVariant::BatteryLevel,
         ];
         let health_telemetry = [
             TelemetryVariant::HeartRate,

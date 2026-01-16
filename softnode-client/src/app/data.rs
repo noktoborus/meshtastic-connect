@@ -296,6 +296,10 @@ pub struct PowerMetrics {
     Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord,
 )]
 pub enum TelemetryVariant {
+    // Host Metrics
+    UptimeSeconds,
+
+    // Environment
     BarometricPressure,
     EnvironmentTemperature,
     Lux,
@@ -342,6 +346,7 @@ impl Display for TelemetryVariant {
             TelemetryVariant::HeartRate => write!(f, "Heart Rate"),
             TelemetryVariant::SpO2 => write!(f, "SpO2"),
             TelemetryVariant::HealthTemperature => write!(f, "Health Temperature"),
+            TelemetryVariant::UptimeSeconds => write!(f, "Uptime Seconds"),
         }
     }
 }
@@ -823,6 +828,10 @@ impl NodeInfo {
                             log::info!("Telemetry::LocalStats from {} ignored", self.node_id);
                         }
                         meshtastic::telemetry::Variant::HealthMetrics(health_metrics) => {
+                            log::info!(
+                                "Telemetry::HealthMetrics from {} not ignored",
+                                self.node_id
+                            );
                             if let Some(heart_rate) = health_metrics.heart_bpm {
                                 self.push_telemetry(
                                     timestamp,
@@ -841,7 +850,13 @@ impl NodeInfo {
                                 );
                             }
                         }
-                        meshtastic::telemetry::Variant::HostMetrics(_host_metrics) => {
+                        meshtastic::telemetry::Variant::HostMetrics(host_metrics) => {
+                            self.push_telemetry(
+                                timestamp,
+                                TelemetryVariant::UptimeSeconds,
+                                host_metrics.uptime_seconds as f64,
+                            );
+
                             log::info!("Telemetry::HostMetrics from {} ignored", self.node_id);
                         }
                     }
