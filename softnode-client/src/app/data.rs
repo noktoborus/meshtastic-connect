@@ -297,7 +297,7 @@ pub struct PowerMetrics {
 )]
 pub enum TelemetryVariant {
     BarometricPressure,
-    Temperature,
+    EnvironmentTemperature,
     Lux,
     Iaq,
     Humidity,
@@ -323,7 +323,7 @@ impl Display for TelemetryVariant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TelemetryVariant::BarometricPressure => write!(f, "Pressure"),
-            TelemetryVariant::Temperature => write!(f, "Environment Temperature"),
+            TelemetryVariant::EnvironmentTemperature => write!(f, "Environment Temperature"),
             TelemetryVariant::Lux => write!(f, "Lux"),
             TelemetryVariant::Iaq => write!(f, "Iaq"),
             TelemetryVariant::Humidity => write!(f, "Humidity"),
@@ -726,7 +726,7 @@ impl NodeInfo {
                             if let Some(temperature) = environment_metrics.temperature {
                                 self.push_telemetry(
                                     timestamp,
-                                    TelemetryVariant::Temperature,
+                                    TelemetryVariant::EnvironmentTemperature,
                                     temperature as f64,
                                 );
                             }

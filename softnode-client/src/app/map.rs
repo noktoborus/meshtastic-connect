@@ -128,7 +128,7 @@ fn fix_or_position(
 
 fn get_telemetry_label(node_info: &NodeInfo) -> String {
     [
-        TelemetryVariant::Temperature,
+        TelemetryVariant::EnvironmentTemperature,
         TelemetryVariant::Humidity,
         TelemetryVariant::Lux,
         TelemetryVariant::BarometricPressure,
@@ -144,7 +144,9 @@ fn get_telemetry_label(node_info: &NodeInfo) -> String {
                     .values
                     .last()
                     .map(|value| match variant {
-                        TelemetryVariant::Temperature => Some(format!("{:.2} °C", value.value)),
+                        TelemetryVariant::EnvironmentTemperature => {
+                            Some(format!("{:.2} °C", value.value))
+                        }
                         TelemetryVariant::Humidity => Some(format!("{:.2}%", value.value)),
                         TelemetryVariant::Lux => Some(format!("{:.2} lx", value.value)),
                         TelemetryVariant::BarometricPressure => {

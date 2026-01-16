@@ -51,6 +51,7 @@ enum StaticFilterVariant {
     IsUnmessagable,
     HasEnvironmentTelemetry,
     HasDeviceTelemetry,
+    HasHealthTelemetry,
     Position(PositionVariant),
     BoundingBox,
     IsGateway,
@@ -70,6 +71,11 @@ impl StaticFilterVariant {
             TelemetryVariant::AirUtilTx,
             TelemetryVariant::ChannelUtilization,
             TelemetryVariant::Voltage,
+        ];
+        let health_telemetry = [
+            TelemetryVariant::HeartRate,
+            TelemetryVariant::HealthTemperature,
+            TelemetryVariant::SpO2,
         ];
         match self {
             StaticFilterVariant::PublicKey(_) => {}
@@ -144,6 +150,17 @@ impl StaticFilterVariant {
             StaticFilterVariant::IsGateway => {
                 return node_info.gateway_for.len() != 0;
             }
+            StaticFilterVariant::HasHealthTelemetry => {
+                for (variant, telemetry) in node_info.telemetry.iter() {
+                    if !health_telemetry.contains(variant) {
+                        continue;
+                    }
+                    if telemetry.values.len() > 0 {
+                        return true;
+                    }
+                }
+                return false;
+            }
         }
 
         if ignore_extended {
@@ -171,6 +188,7 @@ impl StaticFilterVariant {
                 StaticFilterVariant::HasDeviceTelemetry => {}
                 StaticFilterVariant::LastSeen(_) => {}
                 StaticFilterVariant::IsGateway => {}
+                StaticFilterVariant::HasHealthTelemetry => {}
             }
         }
 
@@ -598,6 +616,11 @@ impl NodeFilter {
                     StaticFilterVariant::HasDeviceTelemetry,
                     RichText::new("📟"),
                     "Node has device telemetry like channel util, battery level, etc.",
+                ),
+                (
+                    StaticFilterVariant::HasHealthTelemetry,
+                    RichText::new("♡"),
+                    "Node has health telemetry like heart rate, SpO2, etc.",
                 ),
                 (
                     StaticFilterVariant::IsGateway,

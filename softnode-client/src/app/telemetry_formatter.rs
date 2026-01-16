@@ -54,7 +54,7 @@ impl TelemetryFormatter {
                 BarometricUnit::Hectopascals => value,
                 BarometricUnit::MillimetersOfMercury => value * 0.750063755419211,
             },
-            TelemetryVariant::Temperature => match self.temperature_units {
+            TelemetryVariant::EnvironmentTemperature => match self.temperature_units {
                 TemperatureUnit::Celsius => value,
                 TemperatureUnit::Fahrenheit => value * 1.8 + 32.0,
             },
@@ -83,7 +83,7 @@ impl TelemetryFormatter {
                     format!("{:.2} mmHg", value)
                 }
             },
-            TelemetryVariant::Temperature => match self.temperature_units {
+            TelemetryVariant::EnvironmentTemperature => match self.temperature_units {
                 TemperatureUnit::Celsius => {
                     format!("{:.2} °C", value)
                 }
