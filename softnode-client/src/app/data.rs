@@ -612,7 +612,9 @@ impl NodeInfo {
                         let timestamp = DateTime::from_timestamp(mesh_position.timestamp as i64, 0)
                             .unwrap_or(Default::default());
 
-                        let precision_bounds = if mesh_position.precision_bits < 32 {
+                        let precision_bounds = if mesh_position.precision_bits < 32
+                            && mesh_position.precision_bits != 0
+                        {
                             let fix = (1_u64 << (32 - mesh_position.precision_bits)) as f64 * 1e-7;
 
                             let c1 = geo::Point::new(longitude, latitude);
