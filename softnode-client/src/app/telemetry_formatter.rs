@@ -73,8 +73,29 @@ impl TelemetryFormatter {
             TelemetryVariant::BatteryLevel => value,
             TelemetryVariant::HeartRate => value,
             TelemetryVariant::SpO2 => value,
-            TelemetryVariant::HealthTemperature => value,
+            TelemetryVariant::HealthTemperature => match self.temperature_units {
+                TemperatureUnit::Celsius => value,
+                TemperatureUnit::Fahrenheit => value * 1.8 + 32.0,
+            },
             TelemetryVariant::UptimeSeconds => value,
+            TelemetryVariant::AirPM10Standard => value,
+            TelemetryVariant::AirPM25Standard => value,
+            TelemetryVariant::AirPM100Standard => value,
+            TelemetryVariant::AirPM10Environmental => value,
+            TelemetryVariant::AirPM25Environmental => value,
+            TelemetryVariant::AirPM100Environmental => value,
+            TelemetryVariant::AirParticles03um => value,
+            TelemetryVariant::AirParticles05um => value,
+            TelemetryVariant::AirParticles10um => value,
+            TelemetryVariant::AirParticles25um => value,
+            TelemetryVariant::AirParticles50um => value,
+            TelemetryVariant::AirParticles100um => value,
+            TelemetryVariant::AirCo2 => value,
+            TelemetryVariant::AirCo2Temperature => match self.temperature_units {
+                TemperatureUnit::Celsius => value,
+                TemperatureUnit::Fahrenheit => value * 1.8 + 32.0,
+            },
+            TelemetryVariant::AirCo2Humidity => value,
         }
     }
     pub fn format(&self, value: f64, variant: TelemetryVariant) -> String {
@@ -107,7 +128,14 @@ impl TelemetryFormatter {
             TelemetryVariant::BatteryLevel => format!("{:.0}%", value),
             TelemetryVariant::HeartRate => format!("{:.2} bpm", value),
             TelemetryVariant::SpO2 => format!("{:.2}%", value),
-            TelemetryVariant::HealthTemperature => format!("{:.2} °C", value),
+            TelemetryVariant::HealthTemperature => match self.temperature_units {
+                TemperatureUnit::Celsius => {
+                    format!("{:.2} °C", value)
+                }
+                TemperatureUnit::Fahrenheit => {
+                    format!("{:.2} °F", value)
+                }
+            },
             TelemetryVariant::UptimeSeconds => {
                 let timediff = Duration::seconds(value as i64);
 
@@ -119,6 +147,28 @@ impl TelemetryFormatter {
                     format!("{} s", timediff.num_seconds())
                 }
             }
+            TelemetryVariant::AirPM10Standard => format!("{:.2} μg/m³", value),
+            TelemetryVariant::AirPM25Standard => format!("{:.2} μg/m³", value),
+            TelemetryVariant::AirPM100Standard => format!("{:.2} μg/m³", value),
+            TelemetryVariant::AirPM10Environmental => format!("{:.2} μg/m³", value),
+            TelemetryVariant::AirPM25Environmental => format!("{:.2} μg/m³", value),
+            TelemetryVariant::AirPM100Environmental => format!("{:.2} μg/m³", value),
+            TelemetryVariant::AirParticles03um => format!("{:.2} particles/cm³", value),
+            TelemetryVariant::AirParticles05um => format!("{:.2} particles/cm³", value),
+            TelemetryVariant::AirParticles10um => format!("{:.2} particles/cm³", value),
+            TelemetryVariant::AirParticles25um => format!("{:.2} particles/cm³", value),
+            TelemetryVariant::AirParticles50um => format!("{:.2} particles/cm³", value),
+            TelemetryVariant::AirParticles100um => format!("{:.2} particles/cm³", value),
+            TelemetryVariant::AirCo2 => format!("{:.2} ppm", value),
+            TelemetryVariant::AirCo2Temperature => match self.temperature_units {
+                TemperatureUnit::Celsius => {
+                    format!("{:.2} °C", value)
+                }
+                TemperatureUnit::Fahrenheit => {
+                    format!("{:.2} °F", value)
+                }
+            },
+            TelemetryVariant::AirCo2Humidity => format!("{:.2} %", value),
         }
     }
 }

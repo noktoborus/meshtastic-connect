@@ -321,6 +321,22 @@ pub enum TelemetryVariant {
     HeartRate,
     SpO2,
     HealthTemperature,
+    // AirQuality
+    AirPM10Standard,
+    AirPM25Standard,
+    AirPM100Standard,
+    AirPM10Environmental,
+    AirPM25Environmental,
+    AirPM100Environmental,
+    AirParticles03um,
+    AirParticles05um,
+    AirParticles10um,
+    AirParticles25um,
+    AirParticles50um,
+    AirParticles100um,
+    AirCo2,
+    AirCo2Temperature,
+    AirCo2Humidity,
 }
 
 impl Display for TelemetryVariant {
@@ -347,6 +363,21 @@ impl Display for TelemetryVariant {
             TelemetryVariant::SpO2 => write!(f, "SpO2"),
             TelemetryVariant::HealthTemperature => write!(f, "Health Temperature"),
             TelemetryVariant::UptimeSeconds => write!(f, "Uptime Seconds"),
+            TelemetryVariant::AirPM10Standard => write!(f, "Air PM10 Standard"),
+            TelemetryVariant::AirPM25Standard => write!(f, "Air PM25 Standard"),
+            TelemetryVariant::AirPM100Standard => write!(f, "Air PM100 Standard"),
+            TelemetryVariant::AirPM10Environmental => write!(f, "Air PM10 Environmental"),
+            TelemetryVariant::AirPM25Environmental => write!(f, "Air PM25 Environmental"),
+            TelemetryVariant::AirPM100Environmental => write!(f, "Air PM100 Environmental"),
+            TelemetryVariant::AirParticles03um => write!(f, "Air Particles 0.3 um"),
+            TelemetryVariant::AirParticles05um => write!(f, "Air Particles 0.5 um"),
+            TelemetryVariant::AirParticles10um => write!(f, "Air Particles 10 um"),
+            TelemetryVariant::AirParticles25um => write!(f, "Air Particles 25 um"),
+            TelemetryVariant::AirParticles50um => write!(f, "Air Particles 50 um"),
+            TelemetryVariant::AirParticles100um => write!(f, "Air Particles 100 um"),
+            TelemetryVariant::AirCo2 => write!(f, "Air CO2"),
+            TelemetryVariant::AirCo2Temperature => write!(f, "Air CO2 Temperature"),
+            TelemetryVariant::AirCo2Humidity => write!(f, "Air CO2 Humidity"),
         }
     }
 }
@@ -763,8 +794,112 @@ impl NodeInfo {
                                 );
                             }
                         }
-                        meshtastic::telemetry::Variant::AirQualityMetrics(_air_quality_metrics) => {
-                            log::info!("Telemetry::AirQualityMetrics ignored");
+                        meshtastic::telemetry::Variant::AirQualityMetrics(air_quality_metrics) => {
+                            if let Some(pm10_standard) = air_quality_metrics.pm10_standard {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirPM10Standard,
+                                    pm10_standard as f64,
+                                );
+                            }
+                            if let Some(pm25_standard) = air_quality_metrics.pm25_standard {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirPM25Standard,
+                                    pm25_standard as f64,
+                                );
+                            }
+                            if let Some(pm100_standard) = air_quality_metrics.pm100_standard {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirPM100Standard,
+                                    pm100_standard as f64,
+                                );
+                            }
+                            if let Some(pm10_env) = air_quality_metrics.pm10_environmental {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirPM10Environmental,
+                                    pm10_env as f64,
+                                );
+                            }
+                            if let Some(pm25_env) = air_quality_metrics.pm25_environmental {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirPM25Environmental,
+                                    pm25_env as f64,
+                                );
+                            }
+                            if let Some(pm100_env) = air_quality_metrics.pm100_environmental {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirPM100Environmental,
+                                    pm100_env as f64,
+                                );
+                            }
+                            if let Some(part_03um) = air_quality_metrics.particles_03um {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirParticles03um,
+                                    part_03um as f64,
+                                );
+                            }
+                            if let Some(part_05um) = air_quality_metrics.particles_05um {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirParticles05um,
+                                    part_05um as f64,
+                                );
+                            }
+                            if let Some(part_10um) = air_quality_metrics.particles_10um {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirParticles10um,
+                                    part_10um as f64,
+                                );
+                            }
+                            if let Some(part_25um) = air_quality_metrics.particles_25um {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirParticles25um,
+                                    part_25um as f64,
+                                );
+                            }
+                            if let Some(part_50um) = air_quality_metrics.particles_50um {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirParticles50um,
+                                    part_50um as f64,
+                                );
+                            }
+                            if let Some(part_100um) = air_quality_metrics.particles_100um {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirParticles100um,
+                                    part_100um as f64,
+                                );
+                            }
+                            if let Some(co2) = air_quality_metrics.co2 {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirCo2,
+                                    co2 as f64,
+                                );
+                            }
+                            if let Some(co2_temperature) = air_quality_metrics.co2_temperature {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirCo2Temperature,
+                                    co2_temperature as f64,
+                                );
+                            }
+                            if let Some(co2_humidity) = air_quality_metrics.co2_humidity {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::AirCo2Humidity,
+                                    co2_humidity as f64,
+                                );
+                            }
                         }
                         meshtastic::telemetry::Variant::PowerMetrics(power_metrics) => {
                             if let Some(current) = power_metrics.ch1_current {
