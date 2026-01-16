@@ -75,8 +75,22 @@ impl From<StoredMeshPacket> for JournalData {
                                             _local_stats,
                                         ) => "LocalStats".to_string(),
                                         meshtastic::telemetry::Variant::HealthMetrics(
-                                            _health_metrics,
-                                        ) => todo!(),
+                                            health_metrics,
+                                        ) => format!(
+                                            "HealthMetrics: {}{}{}",
+                                            health_metrics
+                                                .temperature
+                                                .map(|temp| format!("{} °C ", temp))
+                                                .unwrap_or("".to_string()),
+                                            health_metrics
+                                                .heart_bpm
+                                                .map(|bpm| format!("{} BPM ", bpm))
+                                                .unwrap_or("".to_string()),
+                                            health_metrics
+                                                .sp_o2
+                                                .map(|spo2| format!("SpO2 {}%", spo2))
+                                                .unwrap_or("".to_string()),
+                                        ),
                                         meshtastic::telemetry::Variant::HostMetrics(
                                             _host_metrics,
                                         ) => "HostMetrics".to_string(),
