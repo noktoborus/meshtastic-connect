@@ -337,6 +337,10 @@ pub enum TelemetryVariant {
     AirCo2,
     AirCo2Temperature,
     AirCo2Humidity,
+
+    // Paxcounter
+    PaxWifi,
+    PaxBLE,
 }
 
 impl Display for TelemetryVariant {
@@ -378,6 +382,8 @@ impl Display for TelemetryVariant {
             TelemetryVariant::AirCo2 => write!(f, "Air CO2"),
             TelemetryVariant::AirCo2Temperature => write!(f, "Air CO2 Temperature"),
             TelemetryVariant::AirCo2Humidity => write!(f, "Air CO2 Humidity"),
+            TelemetryVariant::PaxWifi => write!(f, "Paxcounter Wifi"),
+            TelemetryVariant::PaxBLE => write!(f, "Paxcounter BLE"),
         }
     }
 }
@@ -994,6 +1000,14 @@ impl NodeInfo {
                         }
                     }
                 }
+            }
+            meshtastic::PortNum::PaxcounterApp => {
+                let paxcount = meshtastic::Paxcount::decode(data.payload.as_slice())
+                    .map_err(|e| e.to_string())?;
+                let timestamp = stored_timestamp;
+
+                self.push_telemetry(timestamp, TelemetryVariant::PaxWifi, paxcount.wifi as f64);
+                self.push_telemetry(timestamp, TelemetryVariant::PaxBLE, paxcount.ble as f64);
             }
             _ => {}
         }

@@ -96,6 +96,8 @@ impl TelemetryFormatter {
                 TemperatureUnit::Fahrenheit => value * 1.8 + 32.0,
             },
             TelemetryVariant::AirCo2Humidity => value,
+            TelemetryVariant::PaxWifi => value,
+            TelemetryVariant::PaxBLE => value,
         }
     }
     pub fn format(&self, value: f64, variant: TelemetryVariant) -> String {
@@ -169,6 +171,8 @@ impl TelemetryFormatter {
                 }
             },
             TelemetryVariant::AirCo2Humidity => format!("{:.2} %", value),
+            TelemetryVariant::PaxWifi => format!("{:.0}", value),
+            TelemetryVariant::PaxBLE => format!("{:.0}", value),
         }
     }
 }
