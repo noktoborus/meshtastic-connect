@@ -761,7 +761,6 @@ impl NodeInfo {
                                 }
                             }
                         }
-                        }
                         meshtastic::telemetry::Variant::EnvironmentMetrics(environment_metrics) => {
                             if let Some(barometric) = environment_metrics.barometric_pressure {
                                 self.push_telemetry(
