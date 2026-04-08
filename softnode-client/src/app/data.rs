@@ -743,21 +743,24 @@ impl NodeInfo {
                                 );
                             }
                             if let Some(voltage) = device_metrics.voltage {
-                                if voltage.abs() == 0.0 {
+                                if voltage > 0.0 {
                                     self.push_telemetry(
                                         timestamp,
                                         TelemetryVariant::Voltage,
                                         voltage as f64,
                                     );
-                                    if let Some(battery_level) = device_metrics.battery_level {
-                                        self.push_telemetry(
-                                            timestamp,
-                                            TelemetryVariant::BatteryLevel,
-                                            battery_level as f64,
-                                        );
-                                    }
                                 }
                             }
+                            if let Some(battery_level) = device_metrics.battery_level {
+                                if battery_level < 101 {
+                                    self.push_telemetry(
+                                        timestamp,
+                                        TelemetryVariant::BatteryLevel,
+                                        battery_level as f64,
+                                    );
+                                }
+                            }
+                        }
                         }
                         meshtastic::telemetry::Variant::EnvironmentMetrics(environment_metrics) => {
                             if let Some(barometric) = environment_metrics.barometric_pressure {
