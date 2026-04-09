@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveTime, Utc};
+use chrono::{DateTime, NaiveTime, TimeDelta, Utc};
 use egui::{Align2, Color32, RichText, Style, TextStyle, epaint::Hsva};
 use egui_plot::{HLine, Line, PlotItem, PlotUi, Points, Text};
 use std::{sync::Arc, time::Duration};
@@ -153,46 +153,57 @@ impl Telemetry {
             for (title, telemetry_variant, node_telemetry) in telemetry.iter() {
                 let mut min_value: Option<TelemetryValue> = None;
                 let mut max_value: Option<TelemetryValue> = None;
-                let points: Vec<[f64; 2]> = node_telemetry
-                    .values
-                    .iter()
-                    .map(|v| {
-                        if min_value.as_ref().map_or(true, |min| min.value > v.value) {
-                            min_value = Some(v.clone());
+                let mut point_groups: Vec<Vec<[f64; 2]>> = Vec::new();
+                let mut c: Vec<[f64; 2]> = Vec::new();
+
+                let mut last_timestamp = node_telemetry.values.first().map(|v| v.timestamp);
+                for v in node_telemetry.values.iter() {
+                    if let Some(last_timestamp) = last_timestamp {
+                        if v.timestamp - last_timestamp > TimeDelta::hours(2) {
+                            point_groups.push(c);
+                            c = Vec::new();
                         }
-                        if max_value.as_ref().map_or(true, |max| max.value < v.value) {
-                            max_value = Some(v.clone());
-                        }
-                        [
-                            ((v.timestamp.timestamp() - basetime.timestamp()) / 60) as f64,
-                            telemetry_formatter.value(v.value, *telemetry_variant),
-                        ]
-                    })
-                    .collect();
+                    }
+                    last_timestamp = Some(v.timestamp);
+
+                    if min_value.as_ref().map_or(true, |min| min.value > v.value) {
+                        min_value = Some(v.clone());
+                    }
+                    if max_value.as_ref().map_or(true, |max| max.value < v.value) {
+                        max_value = Some(v.clone());
+                    }
+                    c.push([
+                        ((v.timestamp.timestamp() - basetime.timestamp()) / 60) as f64,
+                        telemetry_formatter.value(v.value, *telemetry_variant),
+                    ]);
+                }
+                point_groups.push(c);
+
                 let color = color_generator.next_color();
-                let plot_points = Points::new(title, points.clone()).radius(4.0).color(color);
-                if min_value != max_value {
-                    if let Some(min_value) = &min_value {
-                        plot_ui.hline(
-                            HLine::new(
+                for points in point_groups {
+                    if min_value != max_value {
+                        if let Some(min_value) = &min_value {
+                            plot_ui.hline(
+                                HLine::new(
+                                    title,
+                                    telemetry_formatter.value(min_value.value, *telemetry_variant),
+                                )
+                                .color(color)
+                                .width(0.5),
+                            );
+                            plot_value(
+                                TextStyle::Small,
+                                &style,
                                 title,
-                                telemetry_formatter.value(min_value.value, *telemetry_variant),
-                            )
-                            .color(color)
-                            .width(0.5),
-                        );
-                        plot_value(
-                            TextStyle::Small,
-                            &style,
-                            title,
-                            color,
-                            plot_ui,
-                            &min_value,
-                            Align2::CENTER_TOP,
-                            basetime,
-                            telemetry_formatter,
-                            *telemetry_variant,
-                        );
+                                color,
+                                plot_ui,
+                                &min_value,
+                                Align2::CENTER_TOP,
+                                basetime,
+                                telemetry_formatter,
+                                *telemetry_variant,
+                            );
+                        }
                     }
 
                     if let Some(max_value) = &max_value {
@@ -217,11 +228,11 @@ impl Telemetry {
                             *telemetry_variant,
                         );
                     }
+                    let plot_points = Points::new(title, points.clone()).radius(4.0).color(color);
+                    let id = PlotItem::id(&plot_points);
+                    plot_ui.points(plot_points);
+                    plot_ui.line(Line::new(title, points).id(id).color(color).width(3.0));
                 }
-                let id = PlotItem::id(&plot_points);
-                let color = PlotItem::color(&plot_points);
-                plot_ui.points(plot_points);
-                plot_ui.line(Line::new(title, points).id(id).color(color).width(3.0));
 
                 if let Some(text_value_style) = &text_value_style {
                     if let Some(first_value) = node_telemetry.values.first() {
