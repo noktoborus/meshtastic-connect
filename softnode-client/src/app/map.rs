@@ -225,10 +225,11 @@ impl<'a> MapPointsPlugin<'a> {
         for (node_id, gateway_info) in gateway_node_info.gateway_for.iter() {
             let connection_color = self.color_generator.next_color();
             if let Some(node_info) = self.nodes.get(node_id) {
-                if !self
-                    .node_filter
-                    .matches(&node_info, self.nodebook.node_get(&node_info.node_id))
-                {
+                if !self.node_filter.matches(
+                    &node_info,
+                    self.nodes,
+                    self.nodebook.node_get(&node_info.node_id),
+                ) {
                     not_on_map_nodes.push(*node_id);
                     continue;
                 }

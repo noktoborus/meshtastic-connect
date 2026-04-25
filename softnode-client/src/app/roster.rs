@@ -115,7 +115,7 @@ impl Roster {
             let mut filtered_nodes: Vec<(&NodeInfo, Selection)> = {
                 nodes
                     .values()
-                    .filter(|v| node_filter.matches(*v, nodebook.node_get(&v.node_id)))
+                    .filter(|v| node_filter.matches(*v, &nodes, nodebook.node_get(&v.node_id)))
                     .map(|node_info| {
                         let mut selection = Selection::None;
                         for roster_plugin in roster_plugins.iter_mut() {

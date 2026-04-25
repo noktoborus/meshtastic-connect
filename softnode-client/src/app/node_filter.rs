@@ -21,6 +21,8 @@ enum FilterVariant {
     PublicPkey(Key),
     ByteNodeId(ByteNodeId),
     NodeId(NodeId),
+    /// Distance in hops range from the given gateway
+    HopDistance(NodeId, u32, u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, Hash)]
@@ -198,7 +200,7 @@ impl StaticFilterVariant {
 }
 
 impl FilterVariant {
-    pub fn matches(&self, node_info: &NodeInfo) -> bool {
+    pub fn matches(&self, node_info: &NodeInfo, nodes: &HashMap<NodeId, NodeInfo>) -> bool {
         match self {
             FilterVariant::Generic(_, normalized_string) => {
                 if node_info
@@ -214,6 +216,20 @@ impl FilterVariant {
             FilterVariant::PublicPkey(_key) => {}
             FilterVariant::ByteNodeId(byte_node_id) => return *byte_node_id == node_info.node_id,
             FilterVariant::NodeId(node_id) => return *node_id == node_info.node_id,
+            FilterVariant::HopDistance(gateway_id, min, max) => {
+                if let Some(gateway_node_info) = nodes.get(gateway_id) {
+                    if let Some(gateway_infos) =
+                        gateway_node_info.gateway_for.get(&node_info.node_id)
+                    {
+                        for gateway_info in gateway_infos {
+                            if let Some(hop_distance) = gateway_info.hop_distance {
+                                return hop_distance >= *min && hop_distance <= *max;
+                            }
+                        }
+                    }
+                }
+                return false;
+            }
         }
 
         if let Some(extended) = node_info.extended_info_history.last() {
@@ -235,6 +251,7 @@ impl FilterVariant {
                 },
                 FilterVariant::ByteNodeId(_byte_node_id) => {}
                 FilterVariant::NodeId(_node_id) => {}
+                FilterVariant::HopDistance(_node_id, _, _) => {}
             }
         }
 
@@ -277,7 +294,12 @@ impl NodeFilter {
         Default::default()
     }
 
-    pub fn matches(&self, node_info: &NodeInfo, node_annotation: Option<&NodeAnnotation>) -> bool {
+    pub fn matches(
+        &self,
+        node_info: &NodeInfo,
+        nodes: &HashMap<NodeId, NodeInfo>,
+        node_annotation: Option<&NodeAnnotation>,
+    ) -> bool {
         let ignore_extended = match self.known_nodes_filter {
             KnownNodesFilter::Unspecified => false,
             KnownNodesFilter::Known => {
@@ -296,7 +318,7 @@ impl NodeFilter {
 
         for (filter_part, enabled) in &self.filter_parts {
             if *enabled {
-                if !filter_part.matches(node_info) {
+                if !filter_part.matches(node_info, nodes) {
                     return false;
                 }
             }
@@ -346,6 +368,24 @@ impl NodeFilter {
             {
                 self.filter_parts
                     .push((FilterVariant::NodeId(node_id), true));
+            } else if unparsed_part.starts_with("!")
+                && let Some((node_part, hops_part)) =
+                    unparsed_part[1..]
+                        .split_once(':')
+                        .map(|(node_part, hops_part)| {
+                            (
+                                node_part,
+                                hops_part.split_once('-').unwrap_or((hops_part, hops_part)),
+                            )
+                        })
+                && let Ok(node_id) = NodeId::try_from(node_part)
+                && let (Ok(hops_min), Ok(hops_max)) =
+                    (hops_part.0.parse::<u32>(), hops_part.1.parse::<u32>())
+            {
+                self.filter_parts.push((
+                    FilterVariant::HopDistance(node_id, hops_min, hops_max),
+                    true,
+                ));
             } else {
                 self.filter_parts.push((
                     FilterVariant::Generic(
@@ -373,6 +413,19 @@ impl NodeFilter {
                         .on_hover_text("NodeID's last byte"),
                     FilterVariant::Generic(origin_string, _normalized_string) => {
                         ui.selectable_label(*enabled, format!("{}", origin_string))
+                    }
+                    FilterVariant::HopDistance(node_id, distance_min, distance_max) => {
+                        if distance_min == distance_max {
+                            ui.selectable_label(
+                                *enabled,
+                                format!("↔🐰 {}:{}", node_id, distance_min),
+                            )
+                        } else {
+                            ui.selectable_label(
+                                *enabled,
+                                format!("↔🐰 {}:{}-{}", node_id, distance_min, distance_max),
+                            )
+                        }
                     }
                 }
                 .clicked()
@@ -679,7 +732,7 @@ pub struct NodeSeeker<'a> {
 
 impl<'a> NodeSeeker<'a> {
     pub fn matches(&self, node_info: &NodeInfo, node_annotation: Option<&NodeAnnotation>) -> bool {
-        self.filter.matches(node_info, node_annotation)
+        self.filter.matches(node_info, self.nodes, node_annotation)
     }
 }
 
