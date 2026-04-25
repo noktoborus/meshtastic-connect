@@ -89,7 +89,7 @@ impl Settings {
                         let mut example_keyring = Keyring::new();
                         example_keyring.add_channel_with_name("SecretChannel", Key::K256(Default::default())).unwrap();
                         example_keyring.add_channel_with_name("AES-128_Channel", Key::K128(Default::default())).unwrap();
-                        example_keyring.add_channel(0x10, Key::K128(Default::default())).unwrap();
+                        example_keyring.add_channel(0x10.into(), Key::K128(Default::default())).unwrap();
                         example_keyring.add_peer(NodeId::from(0xb00bb00b), Default::default()).unwrap();
                         example_keyring.add_remote_peer(NodeId::from(0xdeadbeef), Default::default()).unwrap();
                         match serde_yaml_ng::to_string(&example_keyring) {

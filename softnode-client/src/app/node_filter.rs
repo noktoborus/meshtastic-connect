@@ -324,7 +324,7 @@ impl Display for FilterVariant {
                     write!(f, "{}:{}-{}", node_id, min, max)
                 }
             }
-            FilterVariant::Channel(channel) => write!(f, "%{:#04x}", channel),
+            FilterVariant::Channel(channel) => channel.fmt(f),
         }
     }
 }
@@ -506,7 +506,7 @@ impl NodeFilter {
                         }
                     }
                     FilterVariant::Channel(channel) => {
-                        ui.selectable_label(*enabled, format!("CH {:#04x}", channel))
+                        ui.selectable_label(*enabled, format!("CH {:02X}h", channel))
                     }
                 }
                 .clicked()

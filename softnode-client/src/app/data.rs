@@ -133,7 +133,7 @@ impl From<StoredMeshPacket> for JournalData {
             hop_limit: stored_mesh_packet.header.hop_limit,
             from: stored_mesh_packet.header.from,
             to: stored_mesh_packet.header.to,
-            channel: stored_mesh_packet.header.channel,
+            channel: stored_mesh_packet.header.channel.into(),
             via_mqtt: stored_mesh_packet.header.via_mqtt,
             is_pki: stored_mesh_packet.header.pki_encrypted,
             is_encrypted,
@@ -253,9 +253,11 @@ impl StoredMeshPacket {
         if let Some(data) = self.data {
             let data = match data {
                 DataVariant::Encrypted(items) | DataVariant::DecryptError(_, items) => {
-                    if let Some(cryptor) =
-                        keyring.cryptor_for(self.header.from, self.header.to, self.header.channel)
-                    {
+                    if let Some(cryptor) = keyring.cryptor_for(
+                        self.header.from,
+                        self.header.to,
+                        self.header.channel.into(),
+                    ) {
                         if let Ok(decrypted) = cryptor.decrypt(self.header.id, items.clone()) {
                             if let Ok(data) = meshtastic::Data::decode(decrypted.as_slice()) {
                                 match cryptor {
@@ -1048,7 +1050,7 @@ impl NodeInfo {
             .is_some();
 
         self.seen_in_channels
-            .entry(stored_mesh_packet.header.channel)
+            .entry(stored_mesh_packet.header.channel.into())
             .and_modify(|v| *v = timestamp)
             .or_insert(timestamp);
 
@@ -1097,7 +1099,7 @@ impl NodeInfo {
             timestamp,
             packet_type,
             to: stored_mesh_packet.header.to,
-            channel: stored_mesh_packet.header.channel,
+            channel: stored_mesh_packet.header.channel.into(),
             rx_info: stored_mesh_packet.header.rx.clone(),
             gateway: stored_mesh_packet.gateway,
             packet_id: stored_mesh_packet.header.id,

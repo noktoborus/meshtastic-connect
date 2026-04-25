@@ -1,4 +1,4 @@
-mod channel;
+pub mod channel;
 pub mod cryptor;
 pub mod key;
 pub mod node_id;
@@ -12,6 +12,8 @@ use key::{K256, Key};
 use node_id::NodeId;
 use peer::Peer;
 use serde::{Deserialize, Serialize};
+
+use channel::ChannelHash;
 
 fn serialize_peers<S>(peers: &HashMap<NodeId, Peer>, serializer: S) -> Result<S::Ok, S::Error>
 where
@@ -57,7 +59,7 @@ impl Keyring {
         Ok(())
     }
 
-    pub fn add_channel(&mut self, channel_hash: u32, key: Key) -> Result<(), String> {
+    pub fn add_channel(&mut self, channel_hash: ChannelHash, key: Key) -> Result<(), String> {
         let channel = Channel::new(channel_hash, key);
         self.channels.push(channel);
         Ok(())
@@ -81,7 +83,7 @@ impl Keyring {
         &self,
         from: NodeId,
         channel_name: &String,
-    ) -> Option<(Cryptor, u32)> {
+    ) -> Option<(Cryptor, ChannelHash)> {
         if let Some(channel) = self.channels.iter().find(|chan| {
             chan.name
                 .as_deref()
@@ -122,7 +124,7 @@ impl Keyring {
     }
 
     // Get cryptographic API for channel from `MeshPacket::channel` field
-    pub fn cryptor_for_channel(&self, from: NodeId, channel: u32) -> Option<Cryptor> {
+    pub fn cryptor_for_channel(&self, from: NodeId, channel: ChannelHash) -> Option<Cryptor> {
         if let Some(channel) = self
             .channels
             .iter()
@@ -132,7 +134,7 @@ impl Keyring {
                 channel
                     .name
                     .clone()
-                    .unwrap_or_else(|| format!("{:#04x}", channel.channel_hash)),
+                    .unwrap_or_else(|| channel.channel_hash.to_string()),
                 Symmetric {
                     from,
                     key: channel.key.clone(),
@@ -144,7 +146,7 @@ impl Keyring {
     }
 
     // Get cryptographic API for `MeshPacket::channel` field
-    pub fn cryptor_for(&self, from: NodeId, to: NodeId, channel: u32) -> Option<Cryptor> {
+    pub fn cryptor_for(&self, from: NodeId, to: NodeId, channel: ChannelHash) -> Option<Cryptor> {
         if channel == 0x0 {
             self.cryptor_for_pki(from, to)
         } else {
@@ -169,11 +171,11 @@ mod tests {
             .unwrap();
 
         keyring
-            .add_channel(0x22, Key::K256(Default::default()))
+            .add_channel(0x22.into(), Key::K256(Default::default()))
             .unwrap();
 
         keyring
-            .add_channel(0x31, Key::K256(Default::default()))
+            .add_channel(0x31.into(), Key::K256(Default::default()))
             .unwrap();
 
         keyring

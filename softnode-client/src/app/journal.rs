@@ -1,5 +1,5 @@
 use egui::{Align2, Area, Frame, Label, RichText, ScrollArea, TextWrapMode};
-use meshtastic_connect::keyring::node_id::NodeId;
+use meshtastic_connect::keyring::{channel::ChannelHash, node_id::NodeId};
 
 use crate::app::{
     byte_node_id::ByteNodeId,
@@ -68,7 +68,7 @@ impl JournalPanel {
                     let timestamp_text = entry.timestamp.format("%H:%M:%S");
                     ui.add(Label::new(timestamp_text.to_string()).wrap_mode(TextWrapMode::Extend));
                     if ui
-                        .label(format!("{:#04x}", entry.channel))
+                        .label(ChannelHash::new(entry.channel).to_string())
                         .on_hover_text("Channel's hash or number")
                         .clicked()
                     {
@@ -221,7 +221,12 @@ impl JournalPanel {
         if self.journal_rows_height.len() != journal_length {
             self.journal_rows_height.resize(journal_length, None);
         }
+
         if let Some(scroll_info) = self.scroll_info.take() {
+            if journal_length == 0 || scroll_info.journal_length > journal_length {
+                return;
+            }
+
             let y_offset = scroll_info.y_offset
                 + self.journal_rows_height[scroll_info.journal_length..journal_length]
                     .iter()

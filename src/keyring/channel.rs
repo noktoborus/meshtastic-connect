@@ -1,12 +1,83 @@
 use super::key::Key;
 use std::fmt;
-use std::fmt::Write;
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, Copy)]
+pub struct ChannelHash(u32);
+
+impl serde::Serialize for ChannelHash {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ChannelHash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.try_into().map_err(serde::de::Error::custom)
+    }
+}
+
+impl TryFrom<&str> for ChannelHash {
+    type Error = std::num::ParseIntError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        if s.ends_with("h") {
+            Ok(u32::from_str_radix(&s[..s.len() - 1], 16)?.into())
+        } else {
+            Ok(u32::from_str_radix(s, 16)?.into())
+        }
+    }
+}
+
+impl TryFrom<String> for ChannelHash {
+    type Error = std::num::ParseIntError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.as_str().try_into()
+    }
+}
+
+impl ChannelHash {
+    pub fn new(value: u32) -> Self {
+        ChannelHash(value)
+    }
+}
+
+impl PartialEq<u32> for ChannelHash {
+    fn eq(&self, other: &u32) -> bool {
+        self.0 == *other
+    }
+}
+
+impl fmt::Display for ChannelHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:02X}h", self.0)
+    }
+}
+
+impl From<u32> for ChannelHash {
+    fn from(value: u32) -> Self {
+        ChannelHash(value)
+    }
+}
+
+impl From<ChannelHash> for u32 {
+    fn from(value: ChannelHash) -> Self {
+        value.0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash)]
 pub struct Channel {
     pub name: Option<String>,
     pub key: Key,
-    pub channel_hash: u32,
+    pub channel_hash: ChannelHash,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -24,21 +95,15 @@ impl serde::Serialize for Channel {
     where
         S: serde::Serializer,
     {
-        let make_hex = |hash: u32| {
-            let mut hex = String::with_capacity(10);
-            write!(&mut hex, "{:02X}h", hash).unwrap();
-            hex
-        };
-
         let (name, channel_hash) = if let Some(ref name) = self.name {
             let chan_hash = Self::generate_hash(name.as_str(), self.key.as_bytes()) as u32;
-            if chan_hash == self.channel_hash {
+            if chan_hash == self.channel_hash.into() {
                 (Some(name.clone()), None)
             } else {
-                (Some(name.clone()), Some(make_hex(chan_hash)))
+                (Some(name.clone()), Some(chan_hash.to_string()))
             }
         } else {
-            (None, Some(make_hex(self.channel_hash)))
+            (None, Some(self.channel_hash.to_string()))
         };
 
         let data = SerdeChannelHelper {
@@ -58,16 +123,11 @@ impl<'de> serde::Deserialize<'de> for Channel {
         let data = SerdeChannelHelper::deserialize(deserializer)?;
 
         if let Some(channel_hash) = data.channel_hash {
-            let channel_hash = if channel_hash.ends_with("h") {
-                u32::from_str_radix(&channel_hash[..channel_hash.len() - 1], 16)
-                    .map_err(serde::de::Error::custom)?
-            } else {
-                u32::from_str_radix(&channel_hash, 16).map_err(serde::de::Error::custom)?
-            };
+            let channel_hash = channel_hash.try_into().map_err(serde::de::Error::custom)?;
             Ok(Channel {
                 name: data.name,
                 key: data.key,
-                channel_hash,
+                channel_hash: channel_hash,
             })
         } else if let Some(name) = data.name {
             Ok(Channel::new_with_name(&name, data.key))
@@ -82,9 +142,9 @@ impl<'de> serde::Deserialize<'de> for Channel {
 impl fmt::Display for Channel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(ref name) = self.name {
-            write!(f, "Channel([{:#x}] {})", self.channel_hash, name)
+            write!(f, "Channel([{}] {})", self.channel_hash, name)
         } else {
-            write!(f, "Channel([{:#x}])", self.channel_hash)
+            write!(f, "Channel([{}])", self.channel_hash)
         }
     }
 }
@@ -96,15 +156,15 @@ impl Channel {
         Self {
             name: Some(name.to_string()),
             key,
-            channel_hash: chan_no,
+            channel_hash: chan_no.into(),
         }
     }
 
-    pub fn new(channel_no: u32, key: Key) -> Self {
+    pub fn new(channel_hash: ChannelHash, key: Key) -> Self {
         Self {
             name: None,
             key,
-            channel_hash: channel_no,
+            channel_hash,
         }
     }
 
