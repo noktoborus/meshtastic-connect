@@ -227,6 +227,9 @@ impl FilterVariant {
             FilterVariant::ByteNodeId(byte_node_id) => return *byte_node_id == node_info.node_id,
             FilterVariant::NodeId(node_id) => return *node_id == node_info.node_id,
             FilterVariant::HopDistance(gateway_id, min, max) => {
+                if *gateway_id == node_info.node_id {
+                    return true;
+                }
                 if let Some(gateway_node_info) = nodes.get(gateway_id) {
                     if let Some(gateway_infos) =
                         gateway_node_info.gateway_for.get(&node_info.node_id)
