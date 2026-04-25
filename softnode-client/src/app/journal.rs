@@ -141,11 +141,16 @@ impl JournalPanel {
                         && entry.hop_start - entry.hop_limit == 0)
                         || entry.hop_limit == 7
                     {
-                        ui.small(RichText::new("direct").strong())
-                            .on_hover_text(format!(
-                                "Direct connection to gateway (limit: {}, start: {})",
-                                entry.hop_limit, entry.hop_start
-                            ));
+                        if let Some(gateway) = entry.gateway
+                            && gateway == entry.from
+                        {
+                        } else {
+                            ui.small(RichText::new("direct").strong())
+                                .on_hover_text(format!(
+                                    "Direct connection to gateway (limit: {}, start: {})",
+                                    entry.hop_limit, entry.hop_start
+                                ));
+                        }
                     } else if entry.hop_start >= entry.hop_limit {
                         let away = entry.hop_start - entry.hop_limit;
                         ui.small(away.to_string()).on_hover_text(format!(
