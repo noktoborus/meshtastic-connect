@@ -205,7 +205,7 @@ async fn main() {
 
     for channel in config.keys.channels {
         keyring
-            .add_channel(channel.name.as_str(), channel.key)
+            .add_channel_with_name(channel.name.as_str(), channel.key)
             .unwrap();
     }
 

@@ -51,8 +51,14 @@ impl Keyring {
         Default::default()
     }
 
-    pub fn add_channel(&mut self, name: &str, key: Key) -> Result<(), String> {
-        let channel = Channel::new(name, key);
+    pub fn add_channel_with_name(&mut self, name: &str, key: Key) -> Result<(), String> {
+        let channel = Channel::new_with_name(name, key);
+        self.channels.push(channel);
+        Ok(())
+    }
+
+    pub fn add_channel(&mut self, channel_hash: u32, key: Key) -> Result<(), String> {
+        let channel = Channel::new(channel_hash, key);
         self.channels.push(channel);
         Ok(())
     }
@@ -76,10 +82,15 @@ impl Keyring {
         from: NodeId,
         channel_name: &String,
     ) -> Option<(Cryptor, u32)> {
-        if let Some(channel) = self.channels.iter().find(|chan| chan.name == *channel_name) {
+        if let Some(channel) = self.channels.iter().find(|chan| {
+            chan.name
+                .as_deref()
+                .map(|v| v == channel_name)
+                .unwrap_or(false)
+        }) {
             Some((
                 Cryptor::Symmetric(
-                    channel.name.clone(),
+                    channel.name.clone().unwrap_or_else(|| unreachable!()),
                     Symmetric {
                         from,
                         key: channel.key.clone(),
@@ -118,7 +129,10 @@ impl Keyring {
             .find(|chan| chan.channel_hash == channel)
         {
             Some(Cryptor::Symmetric(
-                channel.name.clone(),
+                channel
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("{:#04x}", channel.channel_hash)),
                 Symmetric {
                     from,
                     key: channel.key.clone(),
@@ -148,10 +162,18 @@ mod tests {
         let mut keyring = Keyring::new();
 
         keyring
-            .add_channel("Channel1", Key::K128(Default::default()))
+            .add_channel_with_name("Channel1", Key::K128(Default::default()))
             .unwrap();
         keyring
-            .add_channel("Channel2", Key::K256(Default::default()))
+            .add_channel_with_name("Channel2", Key::K256(Default::default()))
+            .unwrap();
+
+        keyring
+            .add_channel(0x22, Key::K256(Default::default()))
+            .unwrap();
+
+        keyring
+            .add_channel(0x31, Key::K256(Default::default()))
             .unwrap();
 
         keyring
