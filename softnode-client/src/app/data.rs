@@ -571,6 +571,9 @@ pub struct NodeInfo {
     pub packet_statistics: Vec<NodePacket>,
     pub gateway_for: HashMap<NodeId, Vec<GatewayInfo>>,
     pub gatewayed_by: HashMap<NodeId, GatewayInfo>,
+    /// Список каналов, в которых узел был замечен
+    /// и время последнего присутствия в канале
+    pub seen_in_channels: HashMap<u32, DateTime<Utc>>,
 }
 
 impl NodeInfo {
@@ -1043,6 +1046,12 @@ impl NodeInfo {
                 v.timestamp > current_time - chrono::Duration::minutes(30))
             .find(|v| v.packet_id == stored_mesh_packet.header.id)
             .is_some();
+
+        self.seen_in_channels
+            .entry(stored_mesh_packet.header.channel)
+            .and_modify(|v| *v = timestamp)
+            .or_insert(timestamp);
+
         // TODO: move to perday_telemetry
         // self.push_telemetry(timestamp, TelemetryVariant::MeshPacket, 1);
         let packet_type = if let Some(data) = &stored_mesh_packet.data {

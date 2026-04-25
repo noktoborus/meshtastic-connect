@@ -5,7 +5,7 @@ use std::{
 };
 
 use base64::{Engine, engine::general_purpose};
-use chrono::Duration;
+use chrono::{DateTime, Duration, Utc};
 use egui::{Color32, RichText};
 use meshtastic_connect::keyring::{key::Key, node_id::NodeId};
 use walkers::lon_lat;
@@ -24,6 +24,10 @@ pub enum FilterVariant {
     NodeId(NodeId),
     /// Distance in hops range from the given gateway
     HopDistance(NodeId, u32, u32),
+    /// Фильтрация по присутствию в канале
+    /// Дополнительно, этот фильтр использует временной интервал
+    /// из `StaticFilterVariant::LastSeen`
+    Channel(u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, Hash)]
@@ -145,7 +149,7 @@ impl StaticFilterVariant {
                 return false;
             }
             StaticFilterVariant::LastSeen(duration) => {
-                let now = chrono::Utc::now();
+                let now = Utc::now();
                 if let Some(last) = node_info.packet_statistics.last() {
                     return now - last.timestamp < *duration;
                 }
@@ -201,7 +205,12 @@ impl StaticFilterVariant {
 }
 
 impl FilterVariant {
-    pub fn matches(&self, node_info: &NodeInfo, nodes: &HashMap<NodeId, NodeInfo>) -> bool {
+    pub fn matches(
+        &self,
+        node_info: &NodeInfo,
+        nodes: &HashMap<NodeId, NodeInfo>,
+        seen_window: Option<(DateTime<Utc>, DateTime<Utc>)>,
+    ) -> bool {
         match self {
             FilterVariant::Generic(_, normalized_string) => {
                 if node_info
@@ -231,6 +240,16 @@ impl FilterVariant {
                 }
                 return false;
             }
+            FilterVariant::Channel(channel) => {
+                if let Some(last_seen) = node_info.seen_in_channels.get(channel) {
+                    if let Some(seen_window) = seen_window {
+                        return last_seen >= &seen_window.0 && last_seen <= &seen_window.1;
+                    } else {
+                        return true;
+                    }
+                }
+                return false;
+            }
         }
 
         if let Some(extended) = node_info.extended_info_history.last() {
@@ -253,6 +272,7 @@ impl FilterVariant {
                 FilterVariant::ByteNodeId(_byte_node_id) => {}
                 FilterVariant::NodeId(_node_id) => {}
                 FilterVariant::HopDistance(_node_id, _, _) => {}
+                FilterVariant::Channel(_) => {}
             }
         }
 
@@ -304,6 +324,7 @@ impl Display for FilterVariant {
                     write!(f, "{}:{}-{}", node_id, min, max)
                 }
             }
+            FilterVariant::Channel(channel) => write!(f, "%{:#04x}", channel),
         }
     }
 }
@@ -353,9 +374,23 @@ impl NodeFilter {
             }
         };
 
+        let seen_window = self
+            .static_filter
+            .iter()
+            .filter(|v| matches!(v, StaticFilterVariant::LastSeen(_)))
+            .last()
+            .map(|v| {
+                if let StaticFilterVariant::LastSeen(duration) = v {
+                    let now = Utc::now();
+                    (now - *duration, now)
+                } else {
+                    unreachable!()
+                }
+            });
+
         for (filter_part, enabled) in &self.filter_parts {
             if *enabled {
-                if !filter_part.matches(node_info, nodes) {
+                if !filter_part.matches(node_info, nodes, seen_window) {
                     return false;
                 }
             }
@@ -393,7 +428,13 @@ impl NodeFilter {
                     }
                 }
             }
-            if unparsed_part.starts_with("!*")
+            if unparsed_part.starts_with("%0x") {
+                if let Ok(channel) = u32::from_str_radix(&unparsed_part[3..], 16) {
+                    self.filter_parts
+                        .push((FilterVariant::Channel(channel), true));
+                    continue;
+                }
+            } else if unparsed_part.starts_with("!*")
                 && unparsed_part.len() <= 2 + 2 /* means: '!*' + '<2 bytes of node id's hex>' */
                 && let Ok(byte_node_id) = ByteNodeId::try_from(&unparsed_part[2..])
             {
@@ -463,6 +504,9 @@ impl NodeFilter {
                                 format!("↔🐰 {}:{}-{}", node_id, distance_min, distance_max),
                             )
                         }
+                    }
+                    FilterVariant::Channel(channel) => {
+                        ui.selectable_label(*enabled, format!("CH {:#04x}", channel))
                     }
                 }
                 .clicked()

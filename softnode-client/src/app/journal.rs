@@ -67,8 +67,13 @@ impl JournalPanel {
                 ui.horizontal(|ui| {
                     let timestamp_text = entry.timestamp.format("%H:%M:%S");
                     ui.add(Label::new(timestamp_text.to_string()).wrap_mode(TextWrapMode::Extend));
-                    ui.label(format!("0x{:02x}", entry.channel))
-                        .on_hover_text("Channel's hash or number");
+                    if ui
+                        .label(format!("{:#04x}", entry.channel))
+                        .on_hover_text("Channel's hash or number")
+                        .clicked()
+                    {
+                        node_filter.set_filters(&mut vec![FilterVariant::Channel(entry.channel)]);
+                    }
 
                     if entry.to != NodeId::broadcast() {
                         if ui
