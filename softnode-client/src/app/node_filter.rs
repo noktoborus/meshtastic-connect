@@ -16,7 +16,7 @@ use crate::app::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-enum FilterVariant {
+pub enum FilterVariant {
     Generic(String, String),
     PublicPkey(Key),
     ByteNodeId(ByteNodeId),
@@ -292,6 +292,13 @@ impl Default for NodeFilter {
 impl NodeFilter {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    pub fn set_filters(&mut self, new_filters: &mut Vec<FilterVariant>) {
+        self.filter_parts.clear();
+        for filter in new_filters.drain(..) {
+            self.filter_parts.push((filter, true));
+        }
     }
 
     pub fn matches(

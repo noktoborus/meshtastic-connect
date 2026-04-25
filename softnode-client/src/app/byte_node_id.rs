@@ -4,7 +4,7 @@ use meshtastic_connect::keyring::node_id::NodeId;
 
 // Last byte of NodeId
 #[derive(
-    Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq, Eq, Hash, PartialOrd, Ord,
+    Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Copy,
 )]
 pub struct ByteNodeId(u8);
 

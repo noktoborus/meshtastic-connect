@@ -482,8 +482,11 @@ impl SoftNodeApp {
     fn update_central_panel(&mut self, ctx: &egui::Context) {
         match &mut self.persistent.active_panel {
             Panel::Journal => {
-                egui::CentralPanel::default()
-                    .show(ctx, |ui| self.persistent.journal.ui(ui, &self.journal));
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.persistent
+                        .journal
+                        .ui(ui, &self.journal, &mut self.persistent.node_filter)
+                });
             }
             Panel::Telemetry(telemetry) => {
                 let fill_color = ctx.style().visuals.extreme_bg_color;

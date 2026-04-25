@@ -1,7 +1,13 @@
 use egui::{Align2, Area, Frame, Label, RichText, ScrollArea, TextWrapMode};
 use meshtastic_connect::keyring::node_id::NodeId;
 
-use crate::app::{byte_node_id::ByteNodeId, data::NodeInfo, node_book::NodeBook, roster};
+use crate::app::{
+    byte_node_id::ByteNodeId,
+    data::NodeInfo,
+    node_book::NodeBook,
+    node_filter::{FilterVariant, NodeFilter},
+    roster,
+};
 
 use super::data::JournalData;
 
@@ -36,6 +42,7 @@ impl JournalPanel {
         ui: &mut egui::Ui,
         journal: &Vec<JournalData>,
         journal_index: usize,
+        node_filter: &mut NodeFilter,
     ) -> Result<f32, ()> {
         if journal_index >= journal.len() {
             return Err(());
@@ -50,7 +57,7 @@ impl JournalPanel {
             .flatten()
             .unwrap_or_default();
 
-        let header = |ui: &mut egui::Ui| {
+        let mut header = |ui: &mut egui::Ui| {
             ui.vertical(|ui| {
                 if journal_index == journal.len() - 1
                     || previous_date != entry.timestamp.date_naive()
@@ -64,14 +71,31 @@ impl JournalPanel {
                         .on_hover_text("Channel's hash or number");
 
                     if entry.to != NodeId::broadcast() {
-                        ui.label(entry.from.to_string())
-                            .on_hover_text("Sender Node ID");
+                        if ui
+                            .label(entry.from.to_string())
+                            .on_hover_text("Sender Node ID\nclick to filter by sender")
+                            .clicked()
+                        {
+                            node_filter.set_filters(&mut vec![FilterVariant::NodeId(entry.from)]);
+                        };
                         ui.label("➡");
-                        ui.label(entry.to.to_string())
-                            .on_hover_text("Recipient Node ID");
+                        if ui
+                            .label(entry.to.to_string())
+                            .on_hover_text("Recipient Node ID\nclick to filter by recipient")
+                            .clicked()
+                        {
+                            node_filter.set_filters(&mut vec![FilterVariant::NodeId(entry.to)]);
+                        }
                     } else {
-                        ui.label(entry.from.to_string())
-                            .on_hover_text("Sender Node ID for broadcast message");
+                        if ui
+                            .label(entry.from.to_string())
+                            .on_hover_text(
+                                "Sender Node ID for broadcast message\nclick to filter by sender",
+                            )
+                            .clicked()
+                        {
+                            node_filter.set_filters(&mut vec![FilterVariant::NodeId(entry.from)]);
+                        };
                     }
 
                     if let Some(gateway) = entry.gateway {
@@ -79,14 +103,33 @@ impl JournalPanel {
                             ui.small(RichText::new(gateway.to_string()).strong())
                                 .on_hover_text("Gateway is same as sender");
                         } else {
-                            ui.small(gateway.to_string())
-                                .on_hover_text("Gateway Node ID");
+                            if ui
+                                .small(gateway.to_string())
+                                .on_hover_text("Gateway Node ID\nclick to filter by gateway")
+                                .clicked()
+                            {
+                                if let Some(gateway) = entry.gateway {
+                                    node_filter.set_filters(&mut vec![FilterVariant::HopDistance(
+                                        gateway, 0, 7,
+                                    )]);
+                                }
+                            }
                         }
                     }
 
                     if entry.relay != ByteNodeId::zero() {
-                        ui.small(entry.relay.to_string())
-                            .on_hover_text("Relay Node ID");
+                        if ui
+                            .small(entry.relay.to_string())
+                            .on_hover_text("Relay Node ID\nclick to filter by gateway and relay")
+                            .clicked()
+                        {
+                            if let Some(gateway) = entry.gateway {
+                                node_filter.set_filters(&mut vec![
+                                    FilterVariant::HopDistance(gateway, 0, 0),
+                                    FilterVariant::ByteNodeId(entry.relay),
+                                ]);
+                            }
+                        };
                     }
 
                     if entry.via_mqtt {
@@ -156,7 +199,12 @@ impl JournalPanel {
             .height())
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, journal: &Vec<JournalData>) {
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        journal: &Vec<JournalData>,
+        node_filter: &mut NodeFilter,
+    ) {
         let mut scroll_area = ScrollArea::both().auto_shrink([false; 2]);
         let default_message_height = 20.0;
         let journal_length = journal.len();
@@ -188,7 +236,8 @@ impl JournalPanel {
                         let hypothetical_height = height_entry.unwrap_or(default_message_height);
 
                         if y_offset + hypothetical_height > viewport.top() {
-                            if let Ok(height) = self.show_journal_entry(ui, journal, journal_index)
+                            if let Ok(height) =
+                                self.show_journal_entry(ui, journal, journal_index, node_filter)
                             {
                                 if self.journal_rows_height[journal_index] != Some(height) {
                                     self.journal_rows_height[journal_index] = Some(height);
