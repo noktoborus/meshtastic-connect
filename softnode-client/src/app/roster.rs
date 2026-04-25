@@ -80,17 +80,20 @@ impl Roster {
         hide_on_action: bool,
     ) -> Option<Panel> {
         ui.horizontal(|ui| {
-            egui::TextEdit::singleline(&mut self.filter)
+            let edit = egui::TextEdit::singleline(&mut self.filter)
                 .desired_width(f32::INFINITY)
                 .hint_text("Search node by id or name")
                 .show(ui);
+            if edit.response.changed() {
+                node_filter.update_filter(self.filter.as_str());
+            } else if !edit.response.has_focus() {
+                self.filter = node_filter.to_string();
+            }
         });
 
         for roster_plugin in roster_plugins.iter_mut() {
             roster_plugin.panel_header_ui(ui, nodebook);
         }
-
-        node_filter.update_filter(self.filter.as_str());
 
         let scroll_area = egui::ScrollArea::vertical().auto_shrink(false);
         let scroll_area = if self.filter.is_empty() {

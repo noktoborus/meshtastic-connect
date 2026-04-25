@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, hash_map::Values},
+    fmt::Display,
     sync::Arc,
 };
 
@@ -286,6 +287,35 @@ impl Default for NodeFilter {
             filter_origin: None,
             bbox: None,
         }
+    }
+}
+
+impl Display for FilterVariant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FilterVariant::Generic(orig, _) => write!(f, "{}", orig),
+            FilterVariant::PublicPkey(key) => write!(f, "{}", key),
+            FilterVariant::ByteNodeId(byte_node_id) => write!(f, "!{}", byte_node_id),
+            FilterVariant::NodeId(node_id) => write!(f, "{}", node_id),
+            FilterVariant::HopDistance(node_id, min, max) => {
+                if min == max {
+                    write!(f, "{}:{}", node_id, min)
+                } else {
+                    write!(f, "{}:{}-{}", node_id, min, max)
+                }
+            }
+        }
+    }
+}
+
+impl Display for NodeFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (variant, enabled) in &self.filter_parts {
+            if *enabled {
+                write!(f, "{} ", variant)?;
+            }
+        }
+        Ok(())
     }
 }
 
