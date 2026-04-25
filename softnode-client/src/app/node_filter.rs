@@ -362,15 +362,15 @@ impl NodeFilter {
         ui.horizontal_wrapped(|ui| {
             for (filter_part, enabled) in self.filter_parts.iter_mut() {
                 match filter_part {
-                    FilterVariant::PublicPkey(pkey) => {
-                        ui.selectable_label(*enabled, format!("pkey:{}", pkey))
-                    }
-                    FilterVariant::NodeId(node_id) => {
-                        ui.selectable_label(*enabled, format!("nid:{}", node_id))
-                    }
-                    FilterVariant::ByteNodeId(byte_node_id) => {
-                        ui.selectable_label(*enabled, format!("rnid:{}", byte_node_id))
-                    }
+                    FilterVariant::PublicPkey(pkey) => ui
+                        .selectable_label(*enabled, format!("🔑 {}", pkey))
+                        .on_hover_text("Public key"),
+                    FilterVariant::NodeId(node_id) => ui
+                        .selectable_label(*enabled, format!("📡 {}", node_id))
+                        .on_hover_text("Node ID"),
+                    FilterVariant::ByteNodeId(byte_node_id) => ui
+                        .selectable_label(*enabled, format!("📡 !{}", byte_node_id))
+                        .on_hover_text("NodeID's last byte"),
                     FilterVariant::Generic(origin_string, _normalized_string) => {
                         ui.selectable_label(*enabled, format!("{}", origin_string))
                     }
