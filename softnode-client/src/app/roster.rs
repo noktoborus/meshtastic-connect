@@ -228,7 +228,7 @@ impl Roster {
                 .map(|v| format_timediff(v.timestamp, current_datetime))
                 .flatten()
             {
-                ui.label(label).on_hover_text("Last seen");
+                ui.label(format!("🕒 {}", label)).on_hover_text("Last seen");
             }
         };
 
