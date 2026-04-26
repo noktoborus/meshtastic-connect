@@ -72,7 +72,9 @@ impl JournalPanel {
                         .on_hover_text("Channel's hash or number")
                         .clicked()
                     {
-                        node_filter.set_filters(&mut vec![FilterVariant::Channel(entry.channel)]);
+                        node_filter.set_filters(&mut vec![FilterVariant::Channel(
+                            ChannelHash::new(entry.channel),
+                        )]);
                     }
 
                     if entry.to != NodeId::broadcast() {
