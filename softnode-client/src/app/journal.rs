@@ -66,7 +66,23 @@ impl JournalPanel {
                 }
                 ui.horizontal(|ui| {
                     let timestamp_text = entry.timestamp.format("%H:%M:%S");
-                    ui.add(Label::new(timestamp_text.to_string()).wrap_mode(TextWrapMode::Extend));
+                    let text = format!(
+                        "from:    {}\nto:      {}\nchannel: {}\ngateway: {} (hops: {}/{})\nrelay:   {}",
+                        entry.from,
+                        entry.to,
+                        ChannelHash::new(entry.channel),
+                        entry
+                            .gateway
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "<unknown>".to_string()),
+                        entry.hop_limit,
+                        entry.hop_start,
+                        entry.relay,
+                    );
+                    let text = RichText::new(text).monospace();
+
+                    ui.add(Label::new(timestamp_text.to_string()).wrap_mode(TextWrapMode::Extend))
+                        .on_hover_text(text);
                     if ui
                         .label(ChannelHash::new(entry.channel).to_string())
                         .on_hover_text("Channel's hash or number")
@@ -148,16 +164,6 @@ impl JournalPanel {
                         && entry.hop_start - entry.hop_limit == 0)
                         || entry.hop_limit == 7
                     {
-                        if let Some(gateway) = entry.gateway
-                            && gateway == entry.from
-                        {
-                        } else {
-                            ui.small(RichText::new("direct").strong())
-                                .on_hover_text(format!(
-                                    "Direct connection to gateway (limit: {}, start: {})",
-                                    entry.hop_limit, entry.hop_start
-                                ));
-                        }
                     } else if entry.hop_start >= entry.hop_limit {
                         let away = entry.hop_start - entry.hop_limit;
                         ui.small(away.to_string()).on_hover_text(format!(
