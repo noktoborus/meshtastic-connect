@@ -51,8 +51,46 @@ impl From<StoredMeshPacket> for JournalData {
                         meshtastic::PortNum::TextMessageApp => {
                             String::from_utf8_lossy(data.payload.as_slice()).into()
                         }
-                        // meshtastic::PortNum::PositionApp => todo!(),
-                        // meshtastic::PortNum::NodeinfoApp => todo!(),
+                        meshtastic::PortNum::NeighborinfoApp => {
+                            match meshtastic::NeighborInfo::decode(data.payload.as_slice()) {
+                                Ok(decoded) => format!("neighbor_info: {:?}", decoded),
+                                Err(e) => format!("<neighbor_info decoding error: {}>", e),
+                            }
+                        }
+                        meshtastic::PortNum::StoreForwardApp => {
+                            match meshtastic::StoreAndForward::decode(data.payload.as_slice()) {
+                                Ok(decoded) => format!("store_and_forward: {:?}", decoded),
+                                Err(e) => format!("<store_and_forward decoding error: {}>", e),
+                            }
+                        }
+                        meshtastic::PortNum::PositionApp => {
+                            match meshtastic::Position::decode(data.payload.as_slice()) {
+                                Ok(position) => vec![
+                                    format!("sensor_id: {}", position.sensor_id),
+                                    format!("latitude_i: {:?}", position.latitude_i),
+                                    format!("longitude_i: {:?}", position.longitude_i),
+                                    format!("sats_in_view: {}", position.sats_in_view),
+                                    format!("time: {}", position.time),
+                                    format!("timestamp: {}", position.timestamp),
+                                    format!("next_update: {}", position.next_update),
+                                ]
+                                .join("\n"),
+                                Err(e) => format!("<position decoding error: {}>", e),
+                            }
+                        }
+                        meshtastic::PortNum::NodeinfoApp => {
+                            match meshtastic::User::decode(data.payload.as_slice()) {
+                                Ok(node_info) => format!(
+                                    "hw_model: {:#x}\nid: {}\nshort_name: {}\nlong_name: {}\nrole: {:?}",
+                                    node_info.hw_model,
+                                    node_info.id,
+                                    node_info.short_name,
+                                    node_info.long_name,
+                                    node_info.role()
+                                ),
+                                Err(e) => format!("<node info decoding error: {}>", e),
+                            }
+                        }
                         // meshtastic::PortNum::WaypointApp => todo!(),
                         meshtastic::PortNum::TelemetryApp => {
                             match meshtastic::Telemetry::decode(data.payload.as_slice()) {
