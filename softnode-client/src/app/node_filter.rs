@@ -22,6 +22,14 @@ pub enum FilterVariant {
     PublicPkey(Key),
     ByteNodeId(ByteNodeId),
     NodeId(NodeId),
+    /// Ототбражать только те узлы,
+    /// которые присутствуют в `NeighborInfo`
+    /// указанного узла
+    Neighbor(NodeId),
+    /// Отображать только те узлы,
+    /// у которых присутствует указанный
+    /// в `NeighborInfo`
+    ReverseNeighbor(NodeId),
     /// Distance in hops range from the given gateway
     HopDistance(NodeId, u32, u32),
     /// Фильтрация по присутствию в канале
@@ -253,6 +261,26 @@ impl FilterVariant {
                 }
                 return false;
             }
+            FilterVariant::Neighbor(node_id) => {
+                if *node_id == node_info.node_id {
+                    return true;
+                } else if let Some(base_node_info) = nodes.get(node_id) {
+                    return base_node_info
+                        .neighbor_info
+                        .iter()
+                        .any(|info| info.node_id == node_info.node_id);
+                }
+                return false;
+            }
+            FilterVariant::ReverseNeighbor(node_id) => {
+                if *node_id == node_info.node_id {
+                    return true;
+                }
+                return node_info
+                    .neighbor_info
+                    .iter()
+                    .any(|info| info.node_id == *node_id);
+            }
         }
 
         if let Some(extended) = node_info.extended_info_history.last() {
@@ -276,6 +304,8 @@ impl FilterVariant {
                 FilterVariant::NodeId(_node_id) => {}
                 FilterVariant::HopDistance(_node_id, _, _) => {}
                 FilterVariant::Channel(_) => {}
+                FilterVariant::Neighbor(_) => {}
+                FilterVariant::ReverseNeighbor(_) => {}
             }
         }
 
@@ -328,6 +358,8 @@ impl Display for FilterVariant {
                 }
             }
             FilterVariant::Channel(channel) => write!(f, "%{}", channel),
+            FilterVariant::Neighbor(node_id) => write!(f, ">{}", node_id),
+            FilterVariant::ReverseNeighbor(node_id) => write!(f, "<{}", node_id),
         }
     }
 }
@@ -431,6 +463,7 @@ impl NodeFilter {
                     }
                 }
             }
+
             if unparsed_part.starts_with("%")
                 && unparsed_part.ends_with("h")
                 && let Ok(channel) = ChannelHash::try_from(&unparsed_part[1..])
@@ -444,6 +477,18 @@ impl NodeFilter {
             {
                 self.filter_parts
                     .push((FilterVariant::ByteNodeId(byte_node_id), true));
+            } else if unparsed_part.starts_with(">!")
+                && unparsed_part.len() <= 8 + 2 /* means: '<!' + '<8 symbols of node id>' */
+                && let Ok(node_id) = NodeId::try_from(&unparsed_part[1..])
+            {
+                self.filter_parts
+                    .push((FilterVariant::Neighbor(node_id), true));
+            } else if unparsed_part.starts_with("<!")
+                && unparsed_part.len() <= 8 + 2 /* means: '<!' + '<8 symbols of node id>' */
+                && let Ok(node_id) = NodeId::try_from(&unparsed_part[1..])
+            {
+                self.filter_parts
+                    .push((FilterVariant::ReverseNeighbor(node_id), true));
             } else if unparsed_part.starts_with("!")
                 && unparsed_part.len() <= 8 + 1 /* means: '!' + '<8 bytes of node id>' */
                 && let Ok(node_id) = NodeId::try_from(&unparsed_part[1..])
@@ -511,6 +556,13 @@ impl NodeFilter {
                     }
                     FilterVariant::Channel(channel) => {
                         ui.selectable_label(*enabled, format!("CH {}", channel))
+                    }
+                    FilterVariant::Neighbor(node_id) => {
+                        ui.selectable_label(*enabled, format!("🎭➡{}", node_id))
+                    }
+
+                    FilterVariant::ReverseNeighbor(node_id) => {
+                        ui.selectable_label(*enabled, format!("🎭⬅{}", node_id))
                     }
                 }
                 .clicked()

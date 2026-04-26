@@ -1,7 +1,7 @@
 use crate::app::{
     data::{NodeInfo, NodeInfoExtended, PublicKey, TelemetryValue, TelemetryVariant},
     node_book::NodeBook,
-    node_filter::NodeFilter,
+    node_filter::{FilterVariant, NodeFilter},
     radio_telemetry::RadioTelemetry,
     settings::Settings,
     telemetry::Telemetry,
@@ -180,6 +180,8 @@ impl Roster {
                     &mut roster_plugins,
                     telemetry_formatter,
                     *selection,
+                    nodes,
+                    node_filter,
                 );
                 match panel_command {
                     PanelCommand::Nothing => {
@@ -215,6 +217,8 @@ impl Roster {
         roster_plugins: &mut Vec<&'a mut dyn Plugin>,
         telemetry_formatter: &TelemetryFormatter,
         selection: Selection,
+        nodes: &HashMap<NodeId, NodeInfo>,
+        node_filter: &mut NodeFilter,
     ) -> (PanelCommand, f32) {
         let current_datetime = chrono::Utc::now();
         let label_last_seen = |ui: &mut egui::Ui| {
@@ -304,7 +308,7 @@ impl Roster {
             });
         };
 
-        let show_node_info = |ui: &mut egui::Ui| -> PanelCommand {
+        let mut show_node_info = |ui: &mut egui::Ui| -> PanelCommand {
             let mut panel_command = PanelCommand::Nothing;
             let via_mqtt = node_info
                 .packet_statistics
@@ -333,6 +337,83 @@ impl Roster {
                 }
             });
             ui.add_space(5.0);
+            if !node_info.neighbor_info.is_empty() {
+                ui.push_id(node_info.node_id, |ui| {
+                    ui.collapsing(
+                        format!("Neighbor ({})", node_info.neighbor_info.len()),
+                        |ui| {
+                            egui::Grid::new("some_unique_id").spacing(Vec2::new(12.0, 4.0)).show(ui, |ui| {
+                            ui.label(RichText::new("Neighbor").strong());
+                            if ui
+                                .button("🎭➡")
+                                .on_hover_text("Show only nodes who checked in `NeightborInfo`")
+                                .clicked()
+                            {
+                                node_filter
+                                    .set_filters(&mut vec![FilterVariant::Neighbor(node_info.node_id)]);
+                            };
+
+                            if ui
+                                .button("🎭⬅")
+                                .on_hover_text("Show only nodes whos report this node in `NeigthborInfo`")
+                                .clicked()
+                            {
+                                node_filter
+                                    .set_filters(&mut vec![FilterVariant::ReverseNeighbor(node_info.node_id)]);
+                            }
+                            ui.end_row();
+
+                            for neighbor in &node_info.neighbor_info {
+                                let other_node = nodes.get(&neighbor.node_id);
+
+                                let hover_text = if let Some(extended_info) =
+                                    other_node.map(|v| v.extended_info_history.last()).flatten()
+                                {
+                                    format!(
+                                        "{}\n{}\nNeighbor Node Id\nclick to filter this node id",
+                                        extended_info.short_name, extended_info.long_name
+                                    )
+                                } else {
+                                    "Neighbor Node Id\nclick to filter this node id".to_string()
+                                };
+
+                                if ui
+                                    .label(neighbor.node_id.to_string())
+                                    .on_hover_text(hover_text)
+                                    .clicked()
+                                {
+                                    node_filter.set_filters(&mut vec![FilterVariant::NodeId(
+                                        neighbor.node_id,
+                                    )]);
+                                };
+
+                                ui.label(format!("{:.2}", neighbor.snr))
+                                    .on_hover_text(format!(
+                                        "SNR as {} reporting in `NeighborInfo`",
+                                        node_info.node_id
+                                    ));
+
+                                if let Some(other_node) = other_node
+                                    && let Some(neighbor_snr) = other_node
+                                        .neighbor_info
+                                        .iter()
+                                        .find(|v| v.node_id == node_info.node_id)
+                                {
+                                    ui.label(format!("{:.2}", neighbor_snr.snr)).on_hover_text(
+                                        format!(
+                                            "SNR as {} reporting {} in `NeighborInfo`",
+                                            neighbor.node_id, node_info.node_id
+                                        ),
+                                    );
+                                }
+                                ui.end_row();
+                            }
+                        });
+                        },
+                    );
+                });
+            }
+            ui.add_space(5.0);
             ui.horizontal(|ui| {
                 if !node_info.packet_statistics.is_empty() {
                     ui.menu_button(format!("Heard {}", node_info.gatewayed_by.len()), |ui| {
@@ -352,39 +433,39 @@ impl Roster {
                         }
                     });
                 }
-
-                if !node_info.gateway_for.is_empty() {
-                    let timediff = node_info
-                        .gateway_for
-                        .values()
-                        .map(|v| v.iter().map(|v| v.timestamp).max())
-                        .flatten()
-                        .max()
-                        .map(|timestamp| format_timediff(timestamp, current_datetime))
-                        .flatten();
-                    let label = if let Some(timediff) = timediff {
-                        format!("Gateway {} ({} ago)", node_info.gateway_for.len(), timediff)
-                    } else {
-                        format!("Gateway {}", node_info.gateway_for.len())
-                    };
-                    ui.menu_button(label, |ui| {
-                        if ui.button("by RSSI").clicked() {
-                            panel_command = PanelCommand::NextPanel(Panel::GatewayByRSSI(
-                                node_info.node_id,
-                                Default::default(),
-                            ));
-                            return;
-                        }
-                        if ui.button("by Hops").clicked() {
-                            panel_command = PanelCommand::NextPanel(Panel::GatewayByHops(
-                                node_info.node_id,
-                                Default::default(),
-                            ));
-                            return;
-                        }
-                    });
-                }
             });
+            if !node_info.gateway_for.is_empty() {
+                let timediff = node_info
+                    .gateway_for
+                    .values()
+                    .map(|v| v.iter().map(|v| v.timestamp).max())
+                    .flatten()
+                    .max()
+                    .map(|timestamp| format_timediff(timestamp, current_datetime))
+                    .flatten();
+                let label = if let Some(timediff) = timediff {
+                    format!("Gateway {} ({} ago)", node_info.gateway_for.len(), timediff)
+                } else {
+                    format!("Gateway {}", node_info.gateway_for.len())
+                };
+                ui.menu_button(label, |ui| {
+                    if ui.button("by RSSI").clicked() {
+                        panel_command = PanelCommand::NextPanel(Panel::GatewayByRSSI(
+                            node_info.node_id,
+                            Default::default(),
+                        ));
+                        return;
+                    }
+                    if ui.button("by Hops").clicked() {
+                        panel_command = PanelCommand::NextPanel(Panel::GatewayByHops(
+                            node_info.node_id,
+                            Default::default(),
+                        ));
+                        return;
+                    }
+                });
+            }
+
             panel_command
         };
         let mut show_telemetry_button =

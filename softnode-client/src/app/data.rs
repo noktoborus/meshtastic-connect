@@ -600,6 +600,11 @@ impl From<&StoredMeshPacket> for GatewayInfo {
         }
     }
 }
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+pub struct NeighborInfo {
+    pub node_id: NodeId,
+    pub snr: f32,
+}
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct NodeInfo {
@@ -611,6 +616,9 @@ pub struct NodeInfo {
     pub packet_statistics: Vec<NodePacket>,
     pub gateway_for: HashMap<NodeId, Vec<GatewayInfo>>,
     pub gatewayed_by: HashMap<NodeId, GatewayInfo>,
+    /// Список соседей узла, полученных из сообщения
+    /// `NeighborInfoApp`
+    pub neighbor_info: Vec<NeighborInfo>,
     /// Список каналов, в которых узел был замечен
     /// и время последнего присутствия в канале
     pub seen_in_channels: HashMap<u32, DateTime<Utc>>,
@@ -636,6 +644,19 @@ impl NodeInfo {
         is_duplicate: bool,
     ) -> Result<meshtastic::PortNum, String> {
         match data.portnum() {
+            meshtastic::PortNum::NeighborinfoApp => {
+                let neighbor_info = meshtastic::NeighborInfo::decode(data.payload.as_slice())
+                    .map_err(|e| e.to_string())?;
+
+                self.neighbor_info.clear();
+                for neighbor in neighbor_info.neighbors {
+                    self.neighbor_info.push(NeighborInfo {
+                        node_id: neighbor.node_id.into(),
+                        snr: neighbor.snr,
+                    });
+                }
+                self.neighbor_info.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+            }
             meshtastic::PortNum::PositionApp => {
                 let mesh_position = meshtastic::Position::decode(data.payload.as_slice())
                     .map_err(|e| e.to_string())?;
