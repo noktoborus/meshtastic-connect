@@ -21,6 +21,7 @@ use egui::RichText;
 use egui::mutex::Mutex;
 use journal::JournalPanel;
 use map::MapPanel;
+use meshtastic_connect::keyring::channel::ChannelHash;
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use node_book::NodeBook;
 use node_dump::NodeDump;

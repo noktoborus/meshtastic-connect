@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use meshtastic_connect::{
-    keyring::{Keyring, cryptor::Decrypt, key::Key, node_id::NodeId},
+    keyring::{Keyring, channel::ChannelHash, cryptor::Decrypt, key::Key, node_id::NodeId},
     meshtastic,
 };
 use prost::Message;
@@ -17,7 +17,7 @@ pub struct JournalData {
     pub id: u32,
     pub from: NodeId,
     pub to: NodeId,
-    pub channel: u32,
+    pub channel: ChannelHash,
     pub via_mqtt: bool,
     pub is_pki: bool,
     pub is_encrypted: bool,

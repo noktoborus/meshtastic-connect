@@ -1,5 +1,5 @@
 use egui::{Align2, Area, Frame, Label, RichText, ScrollArea, TextWrapMode};
-use meshtastic_connect::keyring::{channel::ChannelHash, node_id::NodeId};
+use meshtastic_connect::keyring::node_id::NodeId;
 
 use crate::app::{
     byte_node_id::ByteNodeId,
@@ -70,7 +70,7 @@ impl JournalPanel {
                         "from:    {}\nto:      {}\nchannel: {}\ngateway: {} (hops: {}/{})\nrelay:   {}",
                         entry.from,
                         entry.to,
-                        ChannelHash::new(entry.channel),
+                        entry.channel,
                         entry
                             .gateway
                             .map(|v| v.to_string())
@@ -84,12 +84,12 @@ impl JournalPanel {
                     ui.add(Label::new(timestamp_text.to_string()).wrap_mode(TextWrapMode::Extend))
                         .on_hover_text(text);
                     if ui
-                        .label(ChannelHash::new(entry.channel).to_string())
+                        .label(entry.channel.to_string())
                         .on_hover_text("Channel's hash or number")
                         .clicked()
                     {
                         node_filter.set_filters(&mut vec![FilterVariant::Channel(
-                            ChannelHash::new(entry.channel),
+                            entry.channel,
                         )]);
                     }
 
