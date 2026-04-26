@@ -7,6 +7,7 @@ mod radio_telemetry;
 pub mod settings;
 mod telemetry;
 mod telemetry_formatter;
+use std::collections::HashSet;
 use std::{collections::HashMap, f32, ops::ControlFlow, sync::Arc};
 pub mod color_generator;
 pub mod node_book;
@@ -21,7 +22,7 @@ use egui::RichText;
 use egui::mutex::Mutex;
 use journal::JournalPanel;
 use map::MapPanel;
-use meshtastic_connect::keyring::channel::ChannelHash;
+use meshtastic_connect::keyring::channel::{Channel, ChannelHash};
 use meshtastic_connect::keyring::{Keyring, node_id::NodeId};
 use node_book::NodeBook;
 use node_dump::NodeDump;
@@ -82,12 +83,32 @@ pub struct PersistentData {
     pub update_interval_secs: std::time::Duration,
 }
 
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum ChannelPublicy {
+    /// Known channel, stored in the keyring
+    Famous(Channel),
+    /// Keyring not contains information about this channel
+    Underground(ChannelHash),
+}
+
+#[derive(Debug, Default)]
+pub struct ChannelStats {
+    encrypted: usize,
+    decrypted: usize,
+    pki_messages: usize,
+    messages: usize,
+    participants: HashSet<NodeId>,
+}
+
 pub struct SoftNodeApp {
     journal: Vec<JournalData>,
     nodes: HashMap<NodeId, NodeInfo>,
     last_sync_point: Option<u64>,
 
     map_context: MapContext,
+
+    /// Channel statistics, indexed by channel hash
+    channel_stats: HashMap<ChannelPublicy, ChannelStats>,
 
     // Keyring data. Similar to persistent,
     // but saved separately, to avoid keyring drop
@@ -196,6 +217,7 @@ impl SoftNodeApp {
             nodebook,
             persistent,
             bootstrap_done: false,
+            channel_stats: Default::default(),
         }
     }
 }
@@ -460,6 +482,30 @@ impl SoftNodeApp {
                     .and_modify(|v| v.assumed_position = assumed_position);
             }
 
+            self.channel_stats.clear();
+            for journal_item in self.journal.iter() {
+                let stats_key = if let Some(channel) = self
+                    .keyring
+                    .info_for_channel(journal_item.from, journal_item.channel)
+                {
+                    ChannelPublicy::Famous(channel.clone())
+                } else {
+                    ChannelPublicy::Underground(journal_item.channel)
+                };
+
+                let channel_entry = self.channel_stats.entry(stats_key).or_default();
+                channel_entry.messages += 1;
+                channel_entry.participants.insert(journal_item.from);
+                if journal_item.is_encrypted {
+                    channel_entry.encrypted += 1;
+                } else {
+                    channel_entry.decrypted += 1;
+                }
+                if journal_item.is_pki {
+                    channel_entry.pki_messages += 1;
+                }
+            }
+
             for node_id in node_info_changed {
                 find_compromised_pkeys(node_id, &mut self.nodes);
             }
@@ -545,6 +591,7 @@ impl SoftNodeApp {
                     ctx,
                     &mut self.keyring,
                     &mut self.persistent.telemetry_formatter,
+                    &self.channel_stats,
                 ) {
                     self.last_sync_point = None;
                     self.download_state = Default::default();

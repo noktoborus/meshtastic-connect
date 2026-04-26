@@ -1,6 +1,10 @@
-use crate::app::telemetry_formatter::{BarometricUnit, TelemetryFormatter, TemperatureUnit};
+use crate::app::{
+    ChannelPublicy, ChannelStats,
+    telemetry_formatter::{BarometricUnit, TelemetryFormatter, TemperatureUnit},
+};
+use egui::RichText;
 use meshtastic_connect::keyring::{Keyring, key::Key, node_id::NodeId};
-use std::sync::LazyLock;
+use std::{collections::HashMap, sync::LazyLock};
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct Settings {
@@ -23,6 +27,7 @@ impl Settings {
         ctx: &egui::Context,
         keyring: &mut Keyring,
         telemetry_formatter: &mut TelemetryFormatter,
+        channel_stats: &HashMap<ChannelPublicy, ChannelStats>,
     ) -> bool {
         let mut need_update = false;
 
@@ -102,6 +107,41 @@ impl Settings {
                     let theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx(), ui.style());
                     egui_extras::syntax_highlighting::code_view_ui(ui, &theme, KEYRING_YAML.as_str(), "yaml");
                 });
+                if !channel_stats.is_empty() {
+                    ui.collapsing(format!("Channel Stats ({} channels)", channel_stats.len()), |ui| {
+                        let mut display_chan_info = |k: &ChannelPublicy, v: &ChannelStats| {
+                            match k {
+                                ChannelPublicy::Famous(channel) =>{
+                                    ui.horizontal(|ui| {
+                                        let name = channel.name.as_ref().map(|v| RichText::new(v).strong()).unwrap_or_else(|| RichText::new("<name not set>").italics());
+                                        ui.label(RichText::new("-").strong());
+                                        ui.label(name);
+                                        ui.label(channel.channel_hash.to_string());
+                                    });
+                                },
+
+                                ChannelPublicy::Underground(channel_hash) => {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new("-").strong());
+                                        ui.label(RichText::new(channel_hash.to_string()).strong());
+                                    });
+                                }
+                            };
+                            ui.vertical(|ui| {
+                                ui.label(format!("messages: {} (encrypted: {}, decrypted: {}, pki: {})", v.messages, v.encrypted, v.decrypted, v.pki_messages));
+                                ui.label(format!("participants: {}", v.participants.len()));
+                            });
+                        };
+
+                        for (k, v) in channel_stats.iter().filter(|(k, _)| matches!(k, ChannelPublicy::Famous(_))) {
+                            display_chan_info(k, v);
+                        }
+
+                        for (k, v) in channel_stats.iter().filter(|(k, _)| matches!(k, ChannelPublicy::Underground(_))) {
+                            display_chan_info(k, v);
+                        }
+                    });
+                }
                 ui.add(
                     egui::TextEdit::multiline(&mut self.keyring_edit)
                         .font(egui::TextStyle::Monospace) // for cursor height

@@ -123,6 +123,15 @@ impl Keyring {
         }
     }
 
+    /// Get channel information for a given channel hash.
+    /// Currently `from` is ignored, but in future may be used to get channel
+    /// depends on the `from` node id. This can be useful in case of a channel hash collision.
+    pub fn info_for_channel(&self, _from: NodeId, channel: ChannelHash) -> Option<&Channel> {
+        self.channels
+            .iter()
+            .find(|chan| chan.channel_hash == channel)
+    }
+
     // Get cryptographic API for channel from `MeshPacket::channel` field
     pub fn cryptor_for_channel(&self, from: NodeId, channel: ChannelHash) -> Option<Cryptor> {
         if let Some(channel) = self
