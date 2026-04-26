@@ -138,7 +138,7 @@ async fn handle_network_event(
                         if let Some((cryptor, data)) = match keyring.cryptor_for(
                             NodeId::from(mesh_packet.from),
                             NodeId::from(mesh_packet.to),
-                            mesh_packet.channel,
+                            mesh_packet.channel.into(),
                         ) {
                             Some(cryptor) => {
                                 match cryptor.decrypt(mesh_packet.id, encrypted_data.clone()) {
