@@ -114,7 +114,7 @@ pub async fn print_mesh_packet(mesh_packet: MeshPacket, channel_list: &Keyring) 
             meshtastic::mesh_packet::PayloadVariant::Encrypted(items) => {
                 let from = mesh_packet.from.into();
                 let to = mesh_packet.to.into();
-                let decryptor = channel_list.cryptor_for(from, to, mesh_packet.channel);
+                let decryptor = channel_list.cryptor_for(from, to, mesh_packet.channel.into());
 
                 if decryptor.is_none() {
                     println!(
