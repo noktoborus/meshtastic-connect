@@ -344,6 +344,7 @@ impl Roster {
                         |ui| {
                             egui::Grid::new("some_unique_id").spacing(Vec2::new(12.0, 4.0)).show(ui, |ui| {
                             ui.label(RichText::new("Neighbor").strong());
+                            ui.label("");
                             if ui
                                 .button("🎭➡")
                                 .on_hover_text("Show only nodes who checked in `NeightborInfo`")
@@ -366,15 +367,17 @@ impl Roster {
                             for neighbor in &node_info.neighbor_info {
                                 let other_node = nodes.get(&neighbor.node_id);
 
-                                let hover_text = if let Some(extended_info) =
+                                let (short_name, hover_text) = if let Some(extended_info) =
                                     other_node.map(|v| v.extended_info_history.last()).flatten()
                                 {
+                                    (format!("{}", extended_info.short_name),
                                     format!(
                                         "{}\n{}\nNeighbor Node Id\nclick to filter this node id",
                                         extended_info.short_name, extended_info.long_name
-                                    )
+                                    ))
                                 } else {
-                                    "Neighbor Node Id\nclick to filter this node id".to_string()
+                                    ("".to_string(),
+                                    "Neighbor Node Id\nclick to filter this node id".to_string())
                                 };
 
                                 if ui
@@ -386,6 +389,8 @@ impl Roster {
                                         neighbor.node_id,
                                     )]);
                                 };
+
+                                ui.label(short_name);
 
                                 ui.label(format!("{:.2}", neighbor.snr))
                                     .on_hover_text(format!(
