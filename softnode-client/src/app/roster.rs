@@ -337,10 +337,12 @@ impl Roster {
                 }
             });
             ui.add_space(5.0);
-            if !node_info.neighbor_info.is_empty() {
+            if let Some(neighbor_info) = &node_info.neighbor_info
+                && !neighbor_info.1.is_empty()
+            {
                 ui.push_id(node_info.node_id, |ui| {
                     ui.collapsing(
-                        format!("Neighbor ({})", node_info.neighbor_info.len()),
+                        format!("Neighbors: {} [{}]", neighbor_info.1.len(), neighbor_info.0.format("%d/%m/%Y %H:%M")),
                         |ui| {
                             egui::Grid::new("some_unique_id").spacing(Vec2::new(12.0, 4.0)).show(ui, |ui| {
                             ui.label(RichText::new("Neighbor").strong());
@@ -364,7 +366,7 @@ impl Roster {
                             }
                             ui.end_row();
 
-                            for neighbor in &node_info.neighbor_info {
+                            for neighbor in &neighbor_info.1 {
                                 let other_node = nodes.get(&neighbor.node_id);
 
                                 let (short_name, hover_text) = if let Some(extended_info) =
@@ -401,8 +403,8 @@ impl Roster {
                                 if let Some(other_node) = other_node
                                     && let Some(neighbor_snr) = other_node
                                         .neighbor_info
-                                        .iter()
-                                        .find(|v| v.node_id == node_info.node_id)
+                                        .as_ref()
+                                        .map(|(_datetime, infos)| infos.iter().find(|v| v.node_id == node_info.node_id)).flatten()
                                 {
                                     ui.label(format!("{:.2}", neighbor_snr.snr)).on_hover_text(
                                         format!(

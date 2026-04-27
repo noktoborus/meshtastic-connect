@@ -600,6 +600,7 @@ impl From<&StoredMeshPacket> for GatewayInfo {
         }
     }
 }
+
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 pub struct NeighborInfo {
     pub node_id: NodeId,
@@ -617,8 +618,8 @@ pub struct NodeInfo {
     pub gateway_for: HashMap<NodeId, Vec<GatewayInfo>>,
     pub gatewayed_by: HashMap<NodeId, GatewayInfo>,
     /// Список соседей узла, полученных из сообщения
-    /// `NeighborInfoApp`
-    pub neighbor_info: Vec<NeighborInfo>,
+    /// `NeighborInfoApp` и дату получения этих данных
+    pub neighbor_info: Option<(DateTime<Utc>, Vec<NeighborInfo>)>,
     /// Список каналов, в которых узел был замечен
     /// и время последнего присутствия в канале
     pub seen_in_channels: HashMap<u32, DateTime<Utc>>,
@@ -645,17 +646,19 @@ impl NodeInfo {
     ) -> Result<meshtastic::PortNum, String> {
         match data.portnum() {
             meshtastic::PortNum::NeighborinfoApp => {
-                let neighbor_info = meshtastic::NeighborInfo::decode(data.payload.as_slice())
-                    .map_err(|e| e.to_string())?;
+                let received_neighbor_info =
+                    meshtastic::NeighborInfo::decode(data.payload.as_slice())
+                        .map_err(|e| e.to_string())?;
 
-                self.neighbor_info.clear();
-                for neighbor in neighbor_info.neighbors {
-                    self.neighbor_info.push(NeighborInfo {
+                let mut neighbor_info = Vec::new();
+                for neighbor in received_neighbor_info.neighbors {
+                    neighbor_info.push(NeighborInfo {
                         node_id: neighbor.node_id.into(),
                         snr: neighbor.snr,
                     });
                 }
-                self.neighbor_info.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+                neighbor_info.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+                self.neighbor_info = Some((stored_timestamp, neighbor_info));
             }
             meshtastic::PortNum::PositionApp => {
                 let mesh_position = meshtastic::Position::decode(data.payload.as_slice())

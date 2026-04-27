@@ -267,8 +267,11 @@ impl FilterVariant {
                 } else if let Some(base_node_info) = nodes.get(node_id) {
                     return base_node_info
                         .neighbor_info
-                        .iter()
-                        .any(|info| info.node_id == node_info.node_id);
+                        .as_ref()
+                        .map(|(_datetime, infos)| {
+                            infos.iter().any(|info| info.node_id == node_info.node_id)
+                        })
+                        .unwrap_or(false);
                 }
                 return false;
             }
@@ -278,8 +281,9 @@ impl FilterVariant {
                 }
                 return node_info
                     .neighbor_info
-                    .iter()
-                    .any(|info| info.node_id == *node_id);
+                    .as_ref()
+                    .map(|(_datetime, infos)| infos.iter().any(|info| info.node_id == *node_id))
+                    .unwrap_or(false);
             }
         }
 
