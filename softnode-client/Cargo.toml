@@ -4,30 +4,30 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-meshtastic-connect = { path = ".." }
-egui = "0.33"
 eframe = { version = "0.33", default-features = false, features = [
-    "accesskit",     # Make egui compatible with screen readers. NOTE: adds a lot of dependencies.
-    "default_fonts", # Embed the default egui fonts.
-    "glow",          # Use the glow rendering backend. Alternative: "wgpu".
-    "persistence",   # Enable restoring app state when restarting the app.
-    "wayland",       # To support Linux (and CI)
-    "x11",           # To support older Linux distributions (restores one of the default features)
+  "default_fonts",  # Embed the default egui fonts.
+  "accesskit",  # Make egui compatible with screen readers. NOTE: adds a lot of dependencies.
+  "glow",  # Use the glow rendering backend. Alternative: "wgpu".
+  "persistence",  # Enable restoring app state when restarting the app.
+  "wayland",  # To support Linux (and CI)
+  "x11",  # To support older Linux distributions (restores one of the default features)
 ] }
+egui = "0.33"
 log = "0.4.28"
+meshtastic-connect = { path = ".." }
 
+base64 = "0.22.1"
+chrono = { version = "0.4.42", features = ["serde", "wasmbind"] }
+egui_extras = { version = "0.33", features = ["syntect"] }
+egui_plot = "0.34"
+ehttp = { version = "0.5.0", features = ["json", "streaming"] }
+geo = "0.31.0"
+prost = "0.14.1"
 # You only need serde if you want app persistence:
 serde = { version = "1.0.228", features = ["derive"] }
-egui_plot = "0.34"
-chrono = { version = "0.4.42", features = ["serde", "wasmbind"] }
-ehttp = { version = "0.5.0", features = ["json", "streaming"] }
-prost = "0.14.1"
-egui_extras = { version = "0.33", features = ["syntect"] }
+serde_json = "1.0.145"
 serde_yaml_ng = "0.10.0"
 walkers = { version = "0.47.0", features = ["serde"] }
-serde_json = "1.0.145"
-geo = "0.31.0"
-base64 = "0.22.1"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -36,12 +36,15 @@ env_logger = "0.11.8"
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = "0.4.54"
-web-sys = "0.3.81"
 wasmtimer = "0.4.3"
-
-[profile.release]
-opt-level = 2 # fast and small wasm
+web-sys = "0.3.81"
 
 # Optimize all dependencies even in debug builds:
 [profile.dev.package."*"]
 opt-level = 2
+
+[profile.release]
+opt-level = "s"
+strip = true
+lto = "fat"
+codegen-units = 1
