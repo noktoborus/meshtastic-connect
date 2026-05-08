@@ -66,7 +66,7 @@ async fn handle_timer_event(
 
             let encrypted_data = cryptor.encrypt(packet_id, data.encode_to_vec()).unwrap();
             (
-                channel_hash,
+                channel_hash.into(),
                 mesh_packet::PayloadVariant::Encrypted(encrypted_data),
             )
         };
