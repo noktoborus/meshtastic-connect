@@ -342,6 +342,7 @@ pub enum TelemetryVariant {
     // Environment
     BarometricPressure,
     EnvironmentTemperature,
+    UVLux,
     Lux,
     Iaq,
     Humidity,
@@ -389,6 +390,7 @@ impl Display for TelemetryVariant {
             TelemetryVariant::BarometricPressure => write!(f, "Pressure"),
             TelemetryVariant::EnvironmentTemperature => write!(f, "Environment Temperature"),
             TelemetryVariant::Lux => write!(f, "Lux"),
+            TelemetryVariant::UVLux => write!(f, "ULux"),
             TelemetryVariant::Iaq => write!(f, "Iaq"),
             TelemetryVariant::Humidity => write!(f, "Humidity"),
             TelemetryVariant::GasResistance => write!(f, "Gas Resistance"),
@@ -845,6 +847,13 @@ impl NodeInfo {
                             }
                             if let Some(lux) = environment_metrics.lux {
                                 self.push_telemetry(timestamp, TelemetryVariant::Lux, lux as f64);
+                            }
+                            if let Some(uvlux) = environment_metrics.uv_lux {
+                                self.push_telemetry(
+                                    timestamp,
+                                    TelemetryVariant::UVLux,
+                                    uvlux as f64,
+                                );
                             }
                             if let Some(iaq) = environment_metrics.iaq {
                                 self.push_telemetry(timestamp, TelemetryVariant::Iaq, iaq as f64);

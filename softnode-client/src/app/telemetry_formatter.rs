@@ -61,6 +61,7 @@ impl TelemetryFormatter {
                 TemperatureUnit::Fahrenheit => value * 1.8 + 32.0,
             },
             TelemetryVariant::Lux => value,
+            TelemetryVariant::UVLux => value,
             TelemetryVariant::Iaq => value,
             TelemetryVariant::Humidity => value,
             TelemetryVariant::GasResistance => value,
@@ -118,6 +119,7 @@ impl TelemetryFormatter {
                 }
             },
             TelemetryVariant::Lux => format!("{:.2} lx", value),
+            TelemetryVariant::UVLux => format!("{:.2} uvlx", value),
             TelemetryVariant::Iaq => format!("{:.2} IAQ", value),
             TelemetryVariant::Humidity => format!("{:.2}%", value),
             TelemetryVariant::GasResistance => format!("{:.2} kΩ", value),
