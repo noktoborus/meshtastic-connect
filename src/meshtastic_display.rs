@@ -413,8 +413,8 @@ impl fmt::Display for meshtastic::User {
             f,
             "  🛠️ Hardware Model: {}",
             meshtastic::HardwareModel::try_from(self.hw_model)
-                .unwrap()
-                .as_str_name()
+                .map(|v| v.as_str_name().to_string())
+                .unwrap_or_else(|v| format!("<unknown: {v}>"))
         )?;
         if self.is_licensed {
             writeln!(
